@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: BARO AI Chatbot (Grounded)
- * Description: Chatbot AI tư vấn dựa trên Knowledge Base & nội dung nội bộ. Shortcode [ai_chatbot]. Trả lời chỉ khi "grounded".
- * Version: 1.5.2
+ * Description: Chatbot AI tư vấn dựa trên Knowledge Base & nội dung nội bộ. Tự động thêm vào footer.
+ * Version: 1.6.0
  * Author: Baro
  */
 
@@ -12,7 +12,7 @@ class Baro_AI_Chatbot_Grounded {
   const OPT_KEY = 'baro_ai_settings';
 
   public function __construct($plugin_file) {
-    add_shortcode('ai_chatbot', [$this, 'shortcode']);
+    add_action('wp_footer', [$this, 'render_chat_widget']);
     add_action('wp_enqueue_scripts', [$this, 'assets']);
     add_action('rest_api_init', [$this, 'register_routes']);
     add_action('admin_menu', [$this, 'settings_menu']);
@@ -20,6 +20,7 @@ class Baro_AI_Chatbot_Grounded {
     add_action('admin_post_baro_ai_save_product', [$this, 'handle_product_form']);
     add_action('admin_init', [$this, 'handle_product_actions']);
     register_activation_hook($plugin_file, [$this, 'activate']);
+    register_deactivation_hook($plugin_file, [$this, 'deactivate']);
   }
 
   public function activate() {
@@ -53,33 +54,34 @@ class Baro_AI_Chatbot_Grounded {
     dbDelta($sql_products);
   }
 
-  public function shortcode($atts = []) {
-    $defaults = [
-      'title' => 'Tư vấn nhanh',
-      'placeholder' => 'Nhập câu hỏi về dịch vụ/sản phẩm...',
-    ];
-    $a = shortcode_atts($defaults, $atts);
+  public function deactivate() {
+    // Reserved for future deactivation tasks.
+  }
+
+  public function render_chat_widget() {
     wp_enqueue_script('baro-ai-chat');
     wp_enqueue_style('baro-ai-chat');
     $nonce = wp_create_nonce('wp_rest');
     $settings = get_option(self::OPT_KEY, []);
     $brand = isset($settings['brand']) ? esc_html($settings['brand']) : get_bloginfo('name');
-    ob_start(); ?>
-    <div id="baro-ai-root" class="baro-ai-root" data-title="<?php echo esc_attr($a['title']); ?>"
-         data-placeholder="<?php echo esc_attr($a['placeholder']); ?>" data-brand="<?php echo $brand; ?>"></div>
+    $title = 'Hỗ trợ AI '.$brand. ' 🤖';
+    $placeholder = 'Nhập câu hỏi về dịch vụ/sản phẩm...';
+    ?>
+    <div id="baro-ai-root" class="baro-ai-root" data-title="<?php echo esc_attr($title); ?>"
+         data-placeholder="<?php echo esc_attr($placeholder); ?>" data-brand="<?php echo $brand; ?>"></div>
     <script>
       window.BARO_AI_CFG = {
         restBase: "<?php echo esc_js(esc_url_raw(trailingslashit(get_rest_url(null, 'baro-ai/v1')))); ?>",
         nonce: "<?php echo esc_js($nonce); ?>"
       };
     </script>
-    <?php return ob_get_clean();
+    <?php
   }
 
   public function assets() {
     $base = plugin_dir_url(__FILE__);
-    wp_register_script('baro-ai-chat', $base . 'assets/chat.js', [], '1.5.2', true);
-    wp_register_style('baro-ai-chat', $base . 'assets/chat.css', [], '1.5.2');
+    wp_register_script('baro-ai-chat', $base . 'assets/chat.js', [], '1.6.0', true);
+    wp_register_style('baro-ai-chat', $base . 'assets/chat.css', [], '1.6.0');
   }
 
   public function register_routes() {
@@ -275,7 +277,8 @@ class Baro_AI_Chatbot_Grounded {
     }
     $products = $wpdb->get_results("SELECT * FROM $table_name ORDER BY category, name ASC");
     ?>
-    <div class="wrap"><h1>Dịch vụ & Sản phẩm <a href="?page=baro-ai-products&action=add" class="page-title-action">Thêm mới</a> <a href="<?php echo wp_nonce_url('?page=baro-ai-products&action=seed_definitions', 'baro_ai_seed_definitions_nonce'); ?>" class="page-title-action">Thêm định nghĩa dịch vụ</a></h1>
+    <div class="wrap">
+        <h1>Dịch vụ & Sản phẩm <a href="?page=baro-ai-products&action=add" class="page-title-action">Thêm mới</a> <a href="<?php echo wp_nonce_url('?page=baro-ai-products&action=seed_definitions', 'baro_ai_seed_definitions_nonce'); ?>" class="page-title-action">Thêm định nghĩa dịch vụ</a></h1>
         <?php 
         if (!empty($_GET['feedback'])) {
             $feedback_msg = '';
@@ -288,8 +291,7 @@ class Baro_AI_Chatbot_Grounded {
         <table class="wp-list-table widefat fixed striped">
             <thead><tr><th>Tên sản phẩm</th><th>Loại</th><th>Giá</th><th>Hành động</th></tr></thead>
             <tbody>
-            <?php if ($products): foreach ($products as $p):
-                ?>
+            <?php if ($products): foreach ($products as $p): ?>
                 <tr>
                     <td><strong><?php echo esc_html($p->name); ?></strong></td>
                     <td><?php echo esc_html($p->category); ?></td>

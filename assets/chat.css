@@ -1,5 +1,5 @@
 /* Floating UI */
-.baro-ai-root{position:fixed; right:20px; bottom:20px; z-index:9999; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; font-size: 16px;}
+.baro-ai-root{position:fixed; right:20px; bottom:20px; z-index:9999; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; font-size: 16px}
 .baro-fab{position:absolute; right:0; bottom:0; padding:12px 16px; border-radius:999px; border:none; background:#111; color:#fff; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.2);}
 .baro-fab-pulse{position:absolute; inset:0; border-radius:999px; z-index:-1;}
 .baro-fab::before,.baro-fab::after{
@@ -8,10 +8,10 @@
 .baro-fab::after{ animation-delay:1s; }
 @keyframes baro-pulse{0%{transform:scale(1);opacity:.55}70%{transform:scale(1.8);opacity:0}100%{opacity:0}}
 
-.baro-panel{position:absolute; right:0; bottom:64px; width:370px; max-height:70vh; background:#fff; border-radius:16px; box-shadow:0 16px 40px rgba(0,0,0,.18); display:flex; flex-direction:column; overflow:hidden;}
+.baro-panel{position:absolute; right:0; bottom:64px; width:400px; height:550px; background:#fff; border-radius:16px; box-shadow:0 16px 40px rgba(0,0,0,.18); display:flex; flex-direction:column; overflow:hidden;}
 .baro-panel.hidden{display:none}
 .baro-header{padding:12px 14px; font-weight:700; background:#111; color:#fff;}
-.baro-body{padding:12px; overflow:auto; display:flex; flex-direction:column; gap:10px;}
+.baro-body{padding:12px; overflow:auto; display:flex; flex-direction:column; gap:10px; flex-grow: 1;}
 .baro-input{display:flex; gap:8px; padding:10px; border-top:1px solid #eee}
 .baro-input input{flex:1; padding:10px 12px; border:1px solid #e5e5e5; border-radius:12px; font-size: 15px;}
 .baro-input button{padding:10px 14px; border:none; border-radius:12px; background:#111; color:#fff; cursor:pointer; font-size: 15px;}

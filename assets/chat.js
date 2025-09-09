@@ -36,7 +36,7 @@
   );
 
   const fab = h('button', {class:'baro-fab', title:'Chat với ' + brand},
-    h('span', {class:'baro-fab-pulse'}), 'Chat'
+    h('span', {class:'baro-fab-pulse'}), '🤖'
   );
 
   root.appendChild(panel);
