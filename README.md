@@ -33,8 +33,8 @@
 
 1. Tải plugin ZIP và vào **WordPress Dashboard → Plugins → Add New → Upload Plugin** để cài đặt & kích hoạt.
 2. Vào **Settings → BARO AI Chatbot**, cấu hình:
-   - **API Key** (OpenAI).
-   - **Model** (vd: `gpt-4o-mini`).
+   - **API Key** (Gemini).
+   - **Model** (vd: `gemini-1.5-flash-latest`).
    - **Brand** (tên công ty/hệ thống).
    - **Knowledge Base** (nhập nội dung, link nội bộ, giá cả, chính sách).
 3. Thêm shortcode `[ai_chatbot]` vào footer hoặc trang bạn muốn hiển thị chat.
@@ -67,7 +67,7 @@
 
 ## Lưu ý & cảnh báo
 
-- **ChatGPT Plus** không áp dụng cho API. Bạn cần nạp credit riêng ở [platform.openai.com](https://platform.openai.com) để dùng plugin.
+- **Gemini** version hiện tại chỉ sử dụng được API của gemini, các API của AI khác chưa hỗ trợ!.
 - **Không cache HTML chứa shortcode** (nonce sẽ hết hạn).
 - **Đảm bảo các permalinks và REST rewrite rules** hoạt động bình thường.
 
