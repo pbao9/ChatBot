@@ -69,11 +69,12 @@ class Baro_AI_Chatbot_Grounded {
     $placeholder = 'Nhập câu hỏi về dịch vụ/sản phẩm...';
     ?>
     <div id="baro-ai-root" class="baro-ai-root" data-title="<?php echo esc_attr($title); ?>"
-         data-placeholder="<?php echo esc_attr($placeholder); ?>" data-brand="<?php echo $brand; ?>"></div>
+         data-placeholder="<?php echo esc_attr($placeholder); ?>" data-brand="<?php echo $brand; ?>" v-cloak></div>
     <script>
       window.BARO_AI_CFG = {
         restBase: "<?php echo esc_js(esc_url_raw(trailingslashit(get_rest_url(null, 'baro-ai/v1')))); ?>",
-        nonce: "<?php echo esc_js($nonce); ?>"
+        nonce: "<?php echo esc_js($nonce); ?>",
+        pluginUrl: "<?php echo esc_js(plugin_dir_url(__FILE__)); ?>"
       };
     </script>
     <?php
@@ -81,8 +82,11 @@ class Baro_AI_Chatbot_Grounded {
 
   public function assets() {
     $base = plugin_dir_url(__FILE__);
-    wp_register_script('baro-ai-chat', $base . 'assets/chat.js', [], '1.6.0', true);
-    wp_register_style('baro-ai-chat', $base . 'assets/chat.css', [], '1.6.0');
+    // Register Vue.js from a CDN
+    wp_register_script('vue', 'https://unpkg.com/vue@3/dist/vue.global.js', [], '3.4.27', true);
+    // Register our chat script with a dependency on Vue
+    wp_register_script('baro-ai-chat', $base . 'assets/js/chat.js', ['vue'], '1.7.0', true);
+    wp_register_style('baro-ai-chat', $base . 'assets/css/chat.css', [], '1.7.0');
   }
 
   public function register_routes() {
@@ -438,18 +442,33 @@ class Baro_AI_Chatbot_Grounded {
   }
 
   private function extract_and_save_lead($message) {
-    preg_match('/(0[3|5|7|8|9])([0-9]{8})\b/', $message, $phone_matches);
+    preg_match('/(0[3|5|7|8|9])([0-9]{8})/', $message, $phone_matches);
     $phone = !empty($phone_matches[0]) ? $phone_matches[0] : '';
+
     preg_match('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i', $message, $email_matches);
     $email = !empty($email_matches[0]) ? $email_matches[0] : '';
+
+    // If no phone or email is found, it's not a lead.
     if (empty($phone) && empty($email)) return false;
+
     $name = '';
-    if (preg_match('/(tên tôi là|tên của tôi là|tên mình là|mình tên là)\s*([^\d\n,]+)/ui', $message, $name_matches)) {
+    // New regex to capture name from "Tên: John Doe, SĐT: 0123456789"
+    if (preg_match('/Tên:\s*([^,]+)/ui', $message, $name_matches)) {
+        $name = trim($name_matches[1]);
+    } elseif (preg_match('/(tên tôi là|tên của tôi là|tên mình là|mình tên là)\s*([^\d\n,]+)/ui', $message, $name_matches)) {
         $name = trim($name_matches[2]);
     }
+
     global $wpdb;
     $table_name = $wpdb->prefix . 'baro_ai_leads';
-    $wpdb->insert($table_name, ['created_at' => current_time('mysql'), 'name' => sanitize_text_field($name), 'phone' => sanitize_text_field($phone), 'email' => sanitize_email($email), 'message' => sanitize_textarea_field($message)]);
+    $wpdb->insert($table_name, [
+        'created_at' => current_time('mysql'),
+        'name'       => sanitize_text_field($name),
+        'phone'      => sanitize_text_field($phone),
+        'email'      => sanitize_email($email),
+        'message'    => sanitize_textarea_field($message)
+    ]);
+
     return true;
   }
 }

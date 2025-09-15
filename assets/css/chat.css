@@ -1,0 +1,296 @@
+[v-cloak] { display: none; }
+
+/* Floating UI */
+.baro-ai-root{position:fixed; right:20px; bottom:20px; z-index:9999; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; font-size: 16px}
+.baro-fab{position:absolute; right:0; bottom:0; padding:12px 16px; border-radius:999px; border:none; background:#111; color:#fff; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.2);}
+.baro-fab-pulse{position:absolute; inset:0; border-radius:999px; z-index:-1;}
+.baro-fab::before,.baro-fab::after{
+  content:""; position:absolute; inset:-6px; border-radius:999px; background:#111; opacity:.35; animation:baro-pulse 2s linear infinite; z-index:-2;
+}
+.baro-fab::after{ animation-delay:1s; }
+@keyframes baro-pulse{0%{transform:scale(1);opacity:.55}70%{transform:scale(1.8);opacity:0}100%{opacity:0}}
+
+.baro-panel{position:absolute; right:0; bottom:64px; width:400px; height:550px; background:#fff; border-radius:16px; box-shadow:0 16px 40px rgba(0,0,0,.18); display:flex; flex-direction:column; overflow:hidden;}
+.baro-panel.hidden{display:none}
+
+/* Enhanced Header */
+.baro-header{
+  padding:12px 14px; 
+  background:#111; 
+  color:#fff; 
+  display:flex; 
+  justify-content:space-between; 
+  align-items:center;
+}
+.baro-header-left{
+  display:flex; 
+  align-items:center; 
+  gap:10px;
+}
+.baro-ai-icon{
+  font-size:20px; 
+  width:32px; 
+  height:32px; 
+  display:flex; 
+  align-items:center; 
+  justify-content:center; 
+  background:rgba(255,255,255,0.1); 
+  border-radius:50%;
+  overflow:hidden;
+}
+.baro-logo-img{
+  width:100%; 
+  height:100%; 
+  object-fit:contain;
+}
+.baro-header-info{
+  display:flex; 
+  flex-direction:column; 
+  gap:2px;
+}
+.baro-header-title{
+  font-weight:700; 
+  font-size:15px;
+}
+.baro-header-status{
+  display:flex; 
+  align-items:center; 
+  gap:6px; 
+  font-size:12px; 
+  color:#ccc;
+}
+.baro-status-dot{
+  width:6px; 
+  height:6px; 
+  background:#4ade80; 
+  border-radius:50%; 
+  animation:baro-status-pulse 2s ease-in-out infinite;
+}
+@keyframes baro-status-pulse{
+  0%, 100%{opacity:1}
+  50%{opacity:0.5}
+}
+.baro-minimize-btn{
+  background:none; 
+  border:none; 
+  color:#fff; 
+  cursor:pointer; 
+  padding:4px; 
+  border-radius:4px; 
+  transition:background 0.2s;
+}
+.baro-minimize-btn:hover{
+  background:rgba(255,255,255,0.1);
+}
+
+.baro-body{padding:12px; overflow:auto; display:flex; flex-direction:column; gap:10px; flex-grow: 1;}
+.baro-input{display:flex; gap:8px; padding:10px; border-top:1px solid #eee}
+.baro-input input{flex:1; padding:10px 12px; border:1px solid #e5e5e5; border-radius:12px; font-size: 15px;}
+.baro-input button{padding:10px 14px; border:none; border-radius:12px; background:#111; color:#fff; cursor:pointer; font-size: 15px;}
+.baro-send-btn{
+  padding:10px 14px; 
+  border:none; 
+  border-radius:12px; 
+  background:#111; 
+  color:#fff; 
+  cursor:pointer; 
+  display:flex; 
+  align-items:center; 
+  justify-content:center; 
+  transition:background 0.2s;
+}
+.baro-send-btn:hover{
+  background:#333;
+}
+.baro-send-btn svg{
+  width:16px; 
+  height:16px;
+}
+
+/* Enhanced Message Bubbles with Avatars */
+.baro-msg{
+  display:flex; 
+  margin-bottom:8px; 
+  align-items:flex-end; 
+  gap:8px;
+}
+.baro-msg.user{
+  justify-content:flex-end;
+}
+.baro-msg.assistant{
+  justify-content:flex-start;
+}
+.baro-avatar{
+  flex-shrink:0;
+}
+.baro-avatar-icon{
+  width:32px; 
+  height:32px; 
+  border-radius:50%; 
+  display:flex; 
+  align-items:center; 
+  justify-content:center; 
+  font-size:16px;
+  overflow:hidden;
+}
+.baro-msg.assistant .baro-avatar-icon{
+  background:#e5e7eb; 
+  color:#374151;
+}
+.baro-msg.user .baro-avatar-icon{
+  background:#111; 
+  color:#fff;
+}
+.baro-avatar-img{
+  width:100%; 
+  height:100%; 
+  object-fit:contain;
+}
+.baro-msg-content{
+  display:flex; 
+  flex-direction:column; 
+  max-width:calc(80% - 40px);
+}
+.baro-bubble{
+  padding:10px 12px; 
+  border-radius:12px; 
+  line-height:1.45; 
+  word-wrap:break-word;
+}
+.baro-msg.user .baro-bubble{
+  background:#111; 
+  color:#fff; 
+  border-bottom-right-radius:4px;
+}
+.baro-msg.assistant .baro-bubble{
+  background:#f3f4f6; 
+  color:#333; 
+  border-bottom-left-radius:4px;
+  border:1px solid #e5e7eb;
+}
+.baro-bubble.typing{opacity:.7; font-style:italic}
+.baro-bubble a{color:#2563eb; text-decoration:underline}
+.baro-msg-status{
+  font-size:11px; 
+  color:#9ca3af; 
+  margin-top:2px; 
+  text-align:right;
+}
+.baro-msg.user .baro-msg-status{
+  text-align:right;
+}
+.baro-msg.assistant .baro-msg-status{
+  text-align:left;
+}
+
+/* Suggestions Below Chat */
+.baro-suggestions-below{
+  margin-top:15px; 
+  padding-top:15px; 
+  border-top:1px solid #f3f4f6;
+}
+.baro-suggestions-title{
+  font-size:13px; 
+  color:#6b7280; 
+  margin-bottom:8px; 
+  text-align:center;
+}
+.baro-suggestions-below .baro-suggestions{
+  justify-content:center;
+}
+.baro-suggestions-below .baro-suggestions li{
+  font-size:13px; 
+  padding:6px 12px;
+}
+
+/* Initial View */
+.baro-welcome {
+  text-align: center;
+  padding: 20px 10px;
+  color: #555;
+  font-size: 15px;
+}
+.baro-welcome p {
+  margin: 0 0 8px;
+}
+.baro-suggestions {
+  list-style: none;
+  padding: 0 10px 10px;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.baro-suggestions li {
+  padding: 8px 14px;
+  border: 1px solid #e5e5e5;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all .2s;
+}
+.baro-suggestions li:hover {
+  background: #f3f4f6;
+  border-color: #ccc;
+}
+
+/* Info Form */
+.baro-info-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+}
+.baro-info-form p {
+  margin: 0 0 5px;
+  font-size: 15px;
+  color: #333;
+  text-align: center;
+}
+.baro-info-form .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.baro-info-form label {
+  font-size: 14px;
+  color: #555;
+  text-align: left;
+}
+.baro-info-form label span {
+  color: #d93025;
+}
+.baro-info-form input {
+  padding: 10px 12px;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  font-size: 15px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.baro-info-form button {
+  padding: 10px 14px;
+  border: none;
+  border-radius: 12px;
+  background: #111;
+  color: #fff;
+  cursor: pointer;
+  font-size: 15px;
+  margin-top: 5px;
+}
+.baro-info-form .error-msg {
+  color: #d93025;
+  font-size: 13px;
+  margin-top: 5px;
+  text-align: center;
+}
+
+.baro-footer {
+  padding: 8px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #aaa;
+  background: #f9f9f9;
+  border-top: 1px solid #eee;
+}
