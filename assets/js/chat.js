@@ -14,11 +14,19 @@ const baroAiChatApp = {
             </div>
           </div>
         </div>
-        <button class="baro-minimize-btn" @click="togglePanel" title="Thu gọn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-        </button>
+        <div class="baro-header-actions">
+          <button class="baro-clear-btn" @click="clearChatHistory" title="Xóa lịch sử chat" v-if="history.length > 0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3,6 5,6 21,6"></polyline>
+              <path d="m19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
+            </svg>
+          </button>
+          <button class="baro-minimize-btn" @click="togglePanel" title="Thu gọn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+        </div>
       </div>
       <div class="baro-body" ref="body">
         <template v-if="!infoSubmitted">
@@ -57,7 +65,9 @@ const baroAiChatApp = {
             </div>
             <div class="baro-msg-content">
               <div class="baro-bubble" :class="{ typing: msg.typing }" v-html="msg.html"></div>
-              <div v-if="msg.role === 'user' && !msg.typing" class="baro-msg-status">Đã gửi</div>
+              <div v-if="!msg.typing && msg.timestamp" class="baro-msg-status">
+                {{ formatTime(msg.timestamp) }}
+              </div>
             </div>
             <div class="baro-avatar" v-if="msg.role === 'user'">
               <div class="baro-avatar-icon">👤</div>
@@ -84,7 +94,12 @@ const baroAiChatApp = {
           </svg>
         </button>
       </div>
-      <div class="baro-footer">Powered by Thế Giới Số</div>
+      <div class="baro-footer">
+      <a href="https://tgs.com.vn" target="_blank" class="baro-footer-link">
+        <small>Powered by </small>
+        <img :src="primaryLogoUrl" alt="Thế Giới Số" class="baro-footer-logo">
+      </a>
+      </div>
     </div>
     <button class="baro-fab" :title="'Chat với ' + brand" @click="togglePanel">
       <span class="baro-fab-pulse"></span>
@@ -97,7 +112,7 @@ const baroAiChatApp = {
       title: 'Tư vấn nhanh',
       placeholder: 'Nhập câu hỏi...',
       brand: 'Brand',
-      history: [], // { role: 'user' | 'assistant', html: '...', typing: bool }
+      history: [], // { role: 'user' | 'assistant', html: '...', typing: bool, timestamp: number }
       newMessage: '',
       apiConfig: window.BARO_AI_CFG || {},
       infoSubmitted: false,
@@ -105,6 +120,7 @@ const baroAiChatApp = {
       userPhone: '',
       formError: '',
       logoUrl: '',
+      primaryLogoUrl: '',
     };
   },
   mounted() {
@@ -115,12 +131,19 @@ const baroAiChatApp = {
       this.brand = rootEl.dataset.brand || this.brand;
     }
     this.logoUrl = this.getLogoUrl();
+    this.primaryLogoUrl = this.getPrimaryLogoUrl();
+    this.loadChatHistory();
   },
   methods: {
     getLogoUrl() {
       // Get the plugin URL from the global config or construct it
       const pluginUrl = window.BARO_AI_CFG?.pluginUrl || '/wp-content/plugins/baro-ai-chatbot';
       return `${pluginUrl}/assets/images/logo_bubble.png`;
+    },
+    getPrimaryLogoUrl() {
+      // Get the plugin URL from the global config or construct it
+      const pluginUrl = window.BARO_AI_CFG?.pluginUrl || '/wp-content/plugins/baro-ai-chatbot';
+      return `${pluginUrl}/assets/images/logo_primary.png`;
     },
     togglePanel() {
       this.panelVisible = !this.panelVisible;
@@ -129,7 +152,7 @@ const baroAiChatApp = {
       this.newMessage = message;
       this.sendMessage();
     },
-    submitInfo() {
+    async submitInfo() {
       this.formError = '';
       if (!this.userName.trim() || !this.userPhone.trim()) {
         this.formError = 'Vui lòng nhập đầy đủ họ tên và số điện thoại.';
@@ -140,9 +163,36 @@ const baroAiChatApp = {
         this.formError = 'Số điện thoại không hợp lệ (yêu cầu 10 số). ';
         return;
       }
-      this.infoSubmitted = true;
-      // Send the info to the backend right away
-      this.sendMessage(`Tên: ${this.userName}, SĐT: ${this.userPhone}`);
+      
+      // Send form data to backend without showing in chat
+      try {
+        const res = await fetch(this.apiConfig.restBase + 'chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-WP-Nonce': this.apiConfig.nonce
+          },
+          body: JSON.stringify({ 
+            message: `Tên: ${this.userName}, SĐT: ${this.userPhone}`,
+            is_form_submission: true
+          })
+        });
+
+        if (res.ok) {
+          this.infoSubmitted = true;
+          // Show welcome message without the form data
+          this.history.push({ 
+            role: 'assistant', 
+            html: `Xin chào ${this.userName}!<br>Mình là trợ lý AI từ <strong>${this.brand}</strong>. Bạn có thể hỏi mình bất kỳ câu hỏi nào về sản phẩm và dịch vụ nhé!`,
+            timestamp: Date.now()
+          });
+          this.saveChatHistory();
+        } else {
+          this.formError = 'Có lỗi xảy ra, vui lòng thử lại.';
+        }
+      } catch (e) {
+        this.formError = 'Có lỗi xảy ra, vui lòng thử lại.';
+      }
     },
     async sendMessage(initialMessage = '') {
       // Handle case where no parameter is passed (manual input)
@@ -150,7 +200,7 @@ const baroAiChatApp = {
       if (!text) return;
 
       // Add user message to history for display
-      this.history.push({ role: 'user', html: text });
+      this.history.push({ role: 'user', html: text, timestamp: Date.now() });
       this.newMessage = '';
       this.scrollToBottom();
 
@@ -183,20 +233,23 @@ const baroAiChatApp = {
         if (!res.ok) {
           let err = 'Hệ thống đang bận, vui lòng thử lại.';
           try { const j = await res.json(); if (j && j.error) err = j.error; } catch {}
-          this.history.push({ role: 'assistant', html: err });
+          this.history.push({ role: 'assistant', html: err, timestamp: Date.now() });
+          this.saveChatHistory();
           return;
         }
 
         const data = await res.json();
         const answer = (data.answer || '').trim();
 
-        this.history.push({ role: 'assistant', html: answer || 'Xin lỗi, hiện mình chưa có thông tin trong hệ thống.' });
+        this.history.push({ role: 'assistant', html: answer || 'Xin lỗi, hiện mình chưa có thông tin trong hệ thống.', timestamp: Date.now() });
         this.scrollToBottom();
+        this.saveChatHistory();
 
       } catch (e) {
         // Remove typing indicator and show error
         this.history = this.history.filter(m => !m.typing);
-        this.history.push({ role: 'assistant', html: 'Kết nối lỗi. Vui lòng thử lại.' });
+        this.history.push({ role: 'assistant', html: 'Kết nối lỗi. Vui lòng thử lại.', timestamp: Date.now() });
+        this.saveChatHistory();
       }
     },
     scrollToBottom() {
@@ -211,6 +264,93 @@ const baroAiChatApp = {
       const tmp = document.createElement("DIV");
       tmp.innerHTML = html;
       return tmp.textContent || tmp.innerText || "";
+    },
+    // LocalStorage methods
+    saveChatHistory() {
+      try {
+        const chatData = {
+          history: this.history.filter(msg => !msg.typing), // Don't save typing indicators
+          userName: this.userName,
+          userPhone: this.userPhone,
+          infoSubmitted: this.infoSubmitted,
+          timestamp: Date.now()
+        };
+        localStorage.setItem('baro_ai_chat_history', JSON.stringify(chatData));
+      } catch (e) {
+        console.warn('Could not save chat history to localStorage:', e);
+      }
+    },
+    loadChatHistory() {
+      try {
+        const saved = localStorage.getItem('baro_ai_chat_history');
+        if (saved) {
+          const chatData = JSON.parse(saved);
+          // Only load if data is less than 7 days old
+          if (chatData.timestamp && (Date.now() - chatData.timestamp) < 7 * 24 * 60 * 60 * 1000) {
+            this.history = chatData.history || [];
+            this.userName = chatData.userName || '';
+            this.userPhone = chatData.userPhone || '';
+            this.infoSubmitted = chatData.infoSubmitted || false;
+          }
+        }
+      } catch (e) {
+        console.warn('Could not load chat history from localStorage:', e);
+      }
+    },
+    clearChatHistory() {
+      try {
+        localStorage.removeItem('baro_ai_chat_history');
+        this.history = [];
+        this.infoSubmitted = false;
+        this.userName = '';
+        this.userPhone = '';
+      } catch (e) {
+        console.warn('Could not clear chat history from localStorage:', e);
+      }
+    },
+    // Time formatting
+    formatTime(timestamp) {
+      if (!timestamp) return '';
+      
+      const now = Date.now();
+      const diff = now - timestamp;
+      
+      // Less than 1 minute
+      if (diff < 60000) {
+        return 'Vừa xong';
+      }
+      
+      // Less than 1 hour
+      if (diff < 3600000) {
+        const minutes = Math.floor(diff / 60000);
+        return `${minutes} phút trước`;
+      }
+      
+      // Less than 24 hours
+      if (diff < 86400000) {
+        const hours = Math.floor(diff / 3600000);
+        return `${hours} giờ trước`;
+      }
+      
+      // More than 24 hours - show date
+      const date = new Date(timestamp);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      if (date.toDateString() === today.toDateString()) {
+        return `Hôm nay ${date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        return `Hôm qua ${date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+      } else {
+        return date.toLocaleDateString('vi-VN', { 
+          day: '2-digit', 
+          month: '2-digit', 
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+      }
     }
   }
 };

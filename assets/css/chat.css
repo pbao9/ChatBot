@@ -70,7 +70,12 @@
   0%, 100%{opacity:1}
   50%{opacity:0.5}
 }
-.baro-minimize-btn{
+.baro-header-actions{
+  display:flex; 
+  align-items:center; 
+  gap:4px;
+}
+.baro-minimize-btn, .baro-clear-btn{
   background:none; 
   border:none; 
   color:#fff; 
@@ -79,8 +84,12 @@
   border-radius:4px; 
   transition:background 0.2s;
 }
-.baro-minimize-btn:hover{
+.baro-minimize-btn:hover, .baro-clear-btn:hover{
   background:rgba(255,255,255,0.1);
+}
+.baro-clear-btn svg{
+  width:16px; 
+  height:16px;
 }
 
 .baro-body{padding:12px; overflow:auto; display:flex; flex-direction:column; gap:10px; flex-grow: 1;}
@@ -293,4 +302,23 @@
   color: #aaa;
   background: #f9f9f9;
   border-top: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.baro-footer-logo {
+  height: 20px;
+  width: auto;
+  max-width: 120px;
+  object-fit: contain;
+}
+.baro-footer-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  color: #aaa;
+}
+.baro-footer-link:hover {
+  color: #666;
 }

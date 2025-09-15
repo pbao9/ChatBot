@@ -2,7 +2,7 @@
 /**
  * Plugin Name: BARO AI Chatbot (Grounded)
  * Description: Chatbot AI tư vấn dựa trên Knowledge Base & nội dung nội bộ. Tự động thêm vào footer.
- * Version: 1.6.0
+ * Version: 1.7.0
  * Author: TGS Developers
  * Author URI: https://tgs.com.vn
  */
@@ -85,8 +85,8 @@ class Baro_AI_Chatbot_Grounded {
     // Register Vue.js from a CDN
     wp_register_script('vue', 'https://unpkg.com/vue@3/dist/vue.global.js', [], '3.4.27', true);
     // Register our chat script with a dependency on Vue
-    wp_register_script('baro-ai-chat', $base . 'assets/js/chat.js', ['vue'], '1.7.0', true);
-    wp_register_style('baro-ai-chat', $base . 'assets/css/chat.css', [], '1.7.0');
+    wp_register_script('baro-ai-chat', $base . 'assets/js/chat.js', ['vue'], '1.9.0', true);
+    wp_register_style('baro-ai-chat', $base . 'assets/css/chat.css', [], '1.9.0');
   }
 
   public function register_routes() {
@@ -159,11 +159,21 @@ class Baro_AI_Chatbot_Grounded {
     }
     $body = $req->get_json_params();
     $user_msg = trim(sanitize_text_field($body['message'] ?? ''));
+    $is_form_submission = isset($body['is_form_submission']) && $body['is_form_submission'];
+    
     if ($user_msg === '') {
       return new \WP_REST_Response(['error'=>'Empty message'], 400);
     }
-    if ($this->extract_and_save_lead($user_msg)) {
-        return new \WP_REST_Response(['answer' => 'Cảm ơn bạn đã cung cấp thông tin. Chúng tôi sẽ liên hệ bạn lại trong thời gian sớm nhất!'], 200);
+    
+    // Handle form submission - save lead and return success without showing message
+    if ($is_form_submission || $this->extract_and_save_lead($user_msg)) {
+        if ($is_form_submission) {
+            // For form submissions, return success without any message
+            return new \WP_REST_Response(['success' => true], 200);
+        } else {
+            // For regular lead extraction, show the thank you message
+            return new \WP_REST_Response(['answer' => 'Cảm ơn bạn đã cung cấp thông tin. Chúng tôi sẽ liên hệ bạn lại trong thời gian sớm nhất!'], 200);
+        }
     }
     $settings = get_option(self::OPT_KEY, []);
     $api_key  = $settings['api_key'] ?? '';
@@ -467,6 +477,94 @@ class Baro_AI_Chatbot_Grounded {
     return array_unique([$host, 'www.'.$host]);
   }
 
+  private function extract_customer_info_with_ai($message) {
+    $settings = get_option(self::OPT_KEY, []);
+    $api_key = $settings['api_key'] ?? '';
+    
+    if (empty($api_key)) {
+      return $this->extract_customer_info_fallback($message);
+    }
+    
+    $system_prompt = "Bạn là một AI chuyên trích xuất thông tin khách hàng từ tin nhắn. Nhiệm vụ của bạn là phân tích tin nhắn và trích xuất:
+1. Tên khách hàng (nếu có)
+2. Số điện thoại (nếu có) 
+3. Email (nếu có)
+
+Trả về kết quả dưới dạng JSON với format:
+{
+  \"name\": \"Tên khách hàng hoặc null\",
+  \"phone\": \"Số điện thoại hoặc null\", 
+  \"email\": \"Email hoặc null\"
+}
+
+Chỉ trả về JSON, không giải thích thêm.";
+
+    $api_url = "https://generativelanguage.googleapis.com/v1beta/models/{$settings['model']}:generateContent?key={$api_key}";
+    $payload = [
+      'contents' => [
+        [
+          'role' => 'user',
+          'parts' => [['text' => $message]]
+        ]
+      ],
+      'system_instruction' => [
+        'parts' => [['text' => $system_prompt]]
+      ],
+      'generationConfig' => [
+        'temperature' => 0.1,
+        'response_mime_type' => 'application/json'
+      ]
+    ];
+    
+    $response = wp_remote_post($api_url, [
+      'headers' => ['Content-Type' => 'application/json'],
+      'timeout' => 15,
+      'body' => wp_json_encode($payload)
+    ]);
+    
+    if (is_wp_error($response)) {
+      return $this->extract_customer_info_fallback($message);
+    }
+    
+    $data = json_decode(wp_remote_retrieve_body($response), true);
+    if (!is_array($data) || !isset($data['candidates'][0]['content']['parts'][0]['text'])) {
+      return $this->extract_customer_info_fallback($message);
+    }
+    
+    $ai_result = json_decode($data['candidates'][0]['content']['parts'][0]['text'], true);
+    if (!is_array($ai_result)) {
+      return $this->extract_customer_info_fallback($message);
+    }
+    
+    return [
+      'name' => !empty($ai_result['name']) ? trim($ai_result['name']) : '',
+      'phone' => !empty($ai_result['phone']) ? trim($ai_result['phone']) : '',
+      'email' => !empty($ai_result['email']) ? trim($ai_result['email']) : ''
+    ];
+  }
+
+  private function extract_customer_info_fallback($message) {
+    // Fallback to regex-based extraction
+    preg_match('/(0[3|5|7|8|9])([0-9]{8})/', $message, $phone_matches);
+    $phone = !empty($phone_matches[0]) ? $phone_matches[0] : '';
+
+    preg_match('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i', $message, $email_matches);
+    $email = !empty($email_matches[0]) ? $email_matches[0] : '';
+
+    $name = '';
+    if (preg_match('/Tên:\s*([^,]+)/ui', $message, $name_matches)) {
+        $name = trim($name_matches[1]);
+    } elseif (preg_match('/(tên tôi là|tên của tôi là|tên mình là|mình tên là)\s*([^\d\n,]+)/ui', $message, $name_matches)) {
+        $name = trim($name_matches[2]);
+    }
+    
+    return [
+      'name' => $name,
+      'phone' => $phone,
+      'email' => $email
+    ];
+  }
+
   private function send_telegram_notification($name, $phone, $email, $message) {
     $settings = get_option(self::OPT_KEY, []);
     $bot_token = $settings['telegram_bot_token'] ?? '';
@@ -501,22 +599,15 @@ class Baro_AI_Chatbot_Grounded {
   }
 
   private function extract_and_save_lead($message) {
-    preg_match('/(0[3|5|7|8|9])([0-9]{8})/', $message, $phone_matches);
-    $phone = !empty($phone_matches[0]) ? $phone_matches[0] : '';
-
-    preg_match('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i', $message, $email_matches);
-    $email = !empty($email_matches[0]) ? $email_matches[0] : '';
+    // Use AI extraction for better accuracy
+    $customer_info = $this->extract_customer_info_with_ai($message);
+    
+    $name = $customer_info['name'];
+    $phone = $customer_info['phone'];
+    $email = $customer_info['email'];
 
     // If no phone or email is found, it's not a lead.
     if (empty($phone) && empty($email)) return false;
-
-    $name = '';
-    // New regex to capture name from "Tên: John Doe, SĐT: 0123456789"
-    if (preg_match('/Tên:\s*([^,]+)/ui', $message, $name_matches)) {
-        $name = trim($name_matches[1]);
-    } elseif (preg_match('/(tên tôi là|tên của tôi là|tên mình là|mình tên là)\s*([^\d\n,]+)/ui', $message, $name_matches)) {
-        $name = trim($name_matches[2]);
-    }
 
     global $wpdb;
     $table_name = $wpdb->prefix . 'baro_ai_leads';
