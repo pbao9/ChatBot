@@ -3,7 +3,8 @@
  * Plugin Name: BARO AI Chatbot (Grounded)
  * Description: Chatbot AI tư vấn dựa trên Knowledge Base & nội dung nội bộ. Tự động thêm vào footer.
  * Version: 1.6.0
- * Author: Baro
+ * Author: TGS Developers
+ * Author URI: https://tgs.com.vn
  */
 
 if (!defined('ABSPATH')) exit;
