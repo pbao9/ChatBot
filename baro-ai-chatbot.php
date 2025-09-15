@@ -138,12 +138,13 @@ class Baro_AI_Chatbot_Grounded {
 
   private function convert_markdown_to_html($text) {
     $text = htmlspecialchars($text, ENT_NOQUOTES);
+    $text = preg_replace('/
+/', '<br />', $text);
     $text = preg_replace('/\*\*(.*?)\*\*/s', '<strong>$1</strong>', $text);
     $text = preg_replace('/^\*\s(.*?)$/m', '<li>$1</li>', $text);
     if (strpos($text, '<li>') !== false) {
         $text = '<ul>' . str_replace("\n", "", $text) . '</ul>';
     }
-    $text = nl2br($text);
     return $text;
   }
 
@@ -173,7 +174,7 @@ class Baro_AI_Chatbot_Grounded {
     } else {
         $contextText .= "\n" . $this->build_context($kb, [], $brand)[0];
     }
-    $system = "Bạn là một chuyên viên tư vấn bán hàng chuyên nghiệp của {$brand}. Vai trò của bạn là trả lời các câu hỏi của khách hàng một cách ngắn gọn, thân thiện bằng tiếng Việt, và chỉ dựa vào thông tin được cung cấp trong CONTEXT.\n\nQUY TẮC:\n1. CHUYÊN MÔN: Chỉ trả lời các câu hỏi liên quan trực tiếp đến sản phẩm, dịch vụ, chính sách được mô tả trong CONTEXT.\n2. TỪ CHỐI: Nếu người dùng hỏi về bất cứ điều gì ngoài CONTEXT, bạn PHẢI lịch sự từ chối. Sau đó, trả về JSON: `{\"grounded\": false, \"request_contact\": false, \"answer\": \"Xin lỗi, tôi chỉ có thể tư vấn về các sản phẩm và dịch vụ của chúng tôi.\"}`.\n3. KHAI THÁC THÔNG TIN: Nếu câu hỏi của người dùng có liên quan đến sản phẩm/dịch vụ nhưng không thể trả lời bằng CONTEXT, hãy yêu cầu họ cung cấp Tên, SĐT và Email để chuyên gia hỗ trợ. Ví dụ: \"Để tư vấn chi tiết hơn, bạn vui lòng cho mình xin Tên, SĐT và Email để chuyên viên của chúng tôi liên hệ nhé.\". Sau đó, trả về JSON: `{\"grounded\": false, \"request_contact\": true, \"answer\": \"...\"}`.\n4. TRẢ LỜI THÔNG THƯỜNG: Nếu bạn có thể trả lời câu hỏi bằng CONTEXT, hãy trả lời và trích dẫn nguồn (nếu có). Sau đó, trả về JSON: `{\"grounded\": true, \"answer\": \"...\", \"sources\": []}`.\n5. ĐỊNH DẠNG: Luôn sử dụng Markdown để định dạng câu trả lời cho dễ đọc. Dùng **chữ in đậm** để nhấn mạnh các tiêu đề hoặc thông tin quan trọng. Dùng dấu * ở đầu dòng để tạo danh sách.\n\nLUÔN LUÔN trả lời bằng một đối tượng JSON hợp lệ theo các quy tắc trên.\n\nCONTEXT:\n{$contextText}\n\nALLOWED_SOURCES:\n" . implode("\n", $urls);
+    $system = "Bạn là một trợ lý AI hữu ích của {$brand}. Vai trò của bạn là hỗ trợ khách hàng một cách thân thiện, chuyên nghiệp bằng tiếng Việt. Cố gắng trả lời tất cả các câu hỏi một cách tốt nhất có thể.\n\nQUY TẮC:\n1. TRẢ LỜI DỰA VÀO CONTEXT: Khi câu hỏi có thể được trả lời bằng CONTEXT, hãy trả lời và trích dẫn nguồn (nếu có). Sau đó, trả về JSON: `{\"grounded\": true, \"answer\": \"...\", \"sources\": []}`.\n2. TRẢ LỜI CÂU HỎI CHUNG: Đối với các câu hỏi chung hoặc câu hỏi không có trong CONTEXT, hãy trả lời một cách hữu ích. Nếu bạn không biết câu trả lời, hãy nói vậy. Sau đó, trả về JSON: `{\"grounded\": false, \"answer\": \"...\"}`.\n3. KHAI THÁC THÔNG TIN: Nếu câu hỏi của người dùng có liên quan đến sản phẩm/dịch vụ nhưng không thể trả lời bằng CONTEXT, hãy yêu cầu họ cung cấp Tên, SĐT và Email để chuyên gia hỗ trợ. Ví dụ: \"Để tư vấn chi tiết hơn, bạn vui lòng cho mình xin Tên, SĐT và Email để chuyên viên của chúng tôi liên hệ nhé.\". Sau đó, trả về JSON: `{\"grounded\": false, \"request_contact\": true, \"answer\": \"...\"}`.\n4. ĐỊNH DẠNG: Luôn sử dụng Markdown để định dạng câu trả lời cho dễ đọc. Dùng **chữ in đậm** để nhấn mạnh các tiêu đề hoặc thông tin quan trọng. Dùng dấu * ở đầu dòng để tạo danh sách.\n\nLUÔN LUÔN trả lời bằng một đối tượng JSON hợp lệ theo các quy tắc trên.\n\nCONTEXT:\n{$contextText}\n\nALLOWED_SOURCES:\n" . implode("\n", $urls);
     $history  = is_array($body['history'] ?? null) ? $body['history'] : [];
     $contents = [];
     foreach ($history as $turn) {
@@ -277,8 +278,7 @@ class Baro_AI_Chatbot_Grounded {
     }
     $products = $wpdb->get_results("SELECT * FROM $table_name ORDER BY category, name ASC");
     ?>
-    <div class="wrap">
-        <h1>Dịch vụ & Sản phẩm <a href="?page=baro-ai-products&action=add" class="page-title-action">Thêm mới</a> <a href="<?php echo wp_nonce_url('?page=baro-ai-products&action=seed_definitions', 'baro_ai_seed_definitions_nonce'); ?>" class="page-title-action">Thêm định nghĩa dịch vụ</a></h1>
+    <div class="wrap"><h1>Dịch vụ & Sản phẩm <a href="?page=baro-ai-products&action=add" class="page-title-action">Thêm mới</a> <a href="<?php echo wp_nonce_url('?page=baro-ai-products&action=seed_definitions', 'baro_ai_seed_definitions_nonce'); ?>" class="page-title-action">Thêm định nghĩa dịch vụ</a></h1>
         <?php 
         if (!empty($_GET['feedback'])) {
             $feedback_msg = '';
@@ -291,7 +291,8 @@ class Baro_AI_Chatbot_Grounded {
         <table class="wp-list-table widefat fixed striped">
             <thead><tr><th>Tên sản phẩm</th><th>Loại</th><th>Giá</th><th>Hành động</th></tr></thead>
             <tbody>
-            <?php if ($products): foreach ($products as $p): ?>
+            <?php if ($products): foreach ($products as $p):
+                ?>
                 <tr>
                     <td><strong><?php echo esc_html($p->name); ?></strong></td>
                     <td><?php echo esc_html($p->category); ?></td>
@@ -402,7 +403,8 @@ class Baro_AI_Chatbot_Grounded {
         $q->the_post();
         $content = get_post_field('post_content', get_the_ID());
         $content = wp_strip_all_tags($content);
-        $content = preg_replace('/\s+/', ' ', $content);
+        $content = preg_replace('/
+/', ' ', $content);
         $excerpt = mb_substr($content, 0, 700);
         $snips[] = ['title' => get_the_title(), 'url' => get_permalink(), 'text' => $excerpt];
       }
