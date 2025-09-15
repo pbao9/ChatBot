@@ -354,6 +354,10 @@ class Baro_AI_Chatbot_Grounded {
     add_settings_field('model','Model',           [$this,'field_model'],  'baro-ai-chatbot','baro_ai_section');
     add_settings_field('brand','Tên thương hiệu', [$this,'field_brand'],  'baro-ai-chatbot','baro_ai_section');
     add_settings_field('kb','Knowledge Base tĩnh',[$this,'field_kb'],     'baro-ai-chatbot','baro_ai_section');
+    
+    add_settings_section('baro_telegram_section', 'Cấu hình Telegram', '__return_false', 'baro-ai-chatbot');
+    add_settings_field('telegram_bot_token','Telegram Bot Token', [$this,'field_telegram_bot_token'], 'baro-ai-chatbot','baro_telegram_section');
+    add_settings_field('telegram_chat_id','Telegram Chat ID', [$this,'field_telegram_chat_id'], 'baro-ai-chatbot','baro_telegram_section');
   }
 
   public function field_api_key() {
@@ -380,12 +384,34 @@ class Baro_AI_Chatbot_Grounded {
     echo '<textarea name="'.esc_attr(self::OPT_KEY).'[kb]" rows="8" style="width:100%;max-width:720px;">'.esc_textarea($kb).'</textarea>';
     echo '<p class="description">Dán mô tả dịch vụ/sản phẩm, chính sách, giờ làm việc, hotline, link danh mục sản phẩm nội bộ…</p>';
   }
+  
+  public function field_telegram_bot_token() {
+    $v = get_option(self::OPT_KEY, []);
+    $mask = !empty($v['telegram_bot_token']) ? str_repeat('•', 12) : '';
+    echo '<input type="password" name="'.esc_attr(self::OPT_KEY).'[telegram_bot_token]" value="" placeholder="1234567890:ABC..." style="width:420px">';
+    if ($mask) echo '<p><em>Đã lưu một Telegram Bot Token.</em></p>';
+    echo '<p class="description">Lấy từ @BotFather trên Telegram.</p>';
+  }
+  
+  public function field_telegram_chat_id() {
+    $v = get_option(self::OPT_KEY, []);
+    $chat_id = isset($v['telegram_chat_id']) ? $v['telegram_chat_id'] : '';
+    echo '<input type="text" name="'.esc_attr(self::OPT_KEY).'[telegram_chat_id]" value="'.esc_attr($chat_id).'" placeholder="-1001234567890" style="width:260px">';
+    echo '<p class="description">Chat ID hoặc Channel ID để nhận thông báo (có thể âm).</p>';
+  }
 
   public function settings_page() {
     if (isset($_POST[self::OPT_KEY])) {
       $in = wp_unslash($_POST[self::OPT_KEY]);
       $saved = get_option(self::OPT_KEY, []);
-      $new = ['api_key' => !empty($in['api_key']) ? sanitize_text_field($in['api_key']) : ($saved['api_key'] ?? ''), 'model' => sanitize_text_field($in['model'] ?? 'gemini-1.5-flash-latest'), 'brand' => sanitize_text_field($in['brand'] ?? get_bloginfo('name')), 'kb' => wp_kses_post($in['kb'] ?? '')];
+      $new = [
+        'api_key' => !empty($in['api_key']) ? sanitize_text_field($in['api_key']) : ($saved['api_key'] ?? ''), 
+        'model' => sanitize_text_field($in['model'] ?? 'gemini-1.5-flash-latest'), 
+        'brand' => sanitize_text_field($in['brand'] ?? get_bloginfo('name')), 
+        'kb' => wp_kses_post($in['kb'] ?? ''),
+        'telegram_bot_token' => !empty($in['telegram_bot_token']) ? sanitize_text_field($in['telegram_bot_token']) : ($saved['telegram_bot_token'] ?? ''),
+        'telegram_chat_id' => sanitize_text_field($in['telegram_chat_id'] ?? '')
+      ];
       update_option(self::OPT_KEY, $new);
     }
     echo '<div class="wrap"><h1>BARO AI Chatbot (Grounded)</h1><form method="post" action="">';
@@ -441,6 +467,39 @@ class Baro_AI_Chatbot_Grounded {
     return array_unique([$host, 'www.'.$host]);
   }
 
+  private function send_telegram_notification($name, $phone, $email, $message) {
+    $settings = get_option(self::OPT_KEY, []);
+    $bot_token = $settings['telegram_bot_token'] ?? '';
+    $chat_id = $settings['telegram_chat_id'] ?? '';
+    
+    if (empty($bot_token) || empty($chat_id)) {
+      return false;
+    }
+    
+    $text = "🆕 *KHÁCH HÀNG TIỀM NĂNG MỚI*\n\n";
+    $text .= "👤 *Tên:* " . ($name ?: 'Chưa cung cấp') . "\n";
+    $text .= "📞 *SĐT:* " . ($phone ?: 'Chưa cung cấp') . "\n";
+    $text .= "📧 *Email:* " . ($email ?: 'Chưa cung cấp') . "\n";
+    $text .= "💬 *Tin nhắn:* " . $message . "\n";
+    $text .= "⏰ *Thời gian:* " . current_time('d/m/Y H:i:s') . "\n";
+    $text .= "🌐 *Website:* " . get_bloginfo('name');
+    
+    $url = "https://api.telegram.org/bot{$bot_token}/sendMessage";
+    $data = [
+      'chat_id' => $chat_id,
+      'text' => $text,
+      'parse_mode' => 'Markdown'
+    ];
+    
+    $response = wp_remote_post($url, [
+      'headers' => ['Content-Type' => 'application/json'],
+      'body' => wp_json_encode($data),
+      'timeout' => 10
+    ]);
+    
+    return !is_wp_error($response);
+  }
+
   private function extract_and_save_lead($message) {
     preg_match('/(0[3|5|7|8|9])([0-9]{8})/', $message, $phone_matches);
     $phone = !empty($phone_matches[0]) ? $phone_matches[0] : '';
@@ -468,6 +527,9 @@ class Baro_AI_Chatbot_Grounded {
         'email'      => sanitize_email($email),
         'message'    => sanitize_textarea_field($message)
     ]);
+
+    // Send Telegram notification
+    $this->send_telegram_notification($name, $phone, $email, $message);
 
     return true;
   }
