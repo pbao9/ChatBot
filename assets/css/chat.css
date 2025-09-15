@@ -2,10 +2,10 @@
 
 /* Floating UI */
 .baro-ai-root{position:fixed; right:20px; bottom:20px; z-index:9999; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; font-size: 16px}
-.baro-fab{position:absolute; right:0; bottom:0; padding:12px 16px; border-radius:999px; border:none; background:#111; color:#fff; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.2);}
+.baro-fab{position:absolute; right:0; bottom:0; padding:12px 16px; border-radius:999px; border:none; background:#EF6824; color:#fff; cursor:pointer; box-shadow:0 8px 24px rgba(231, 130, 71, 0.2);}
 .baro-fab-pulse{position:absolute; inset:0; border-radius:999px; z-index:-1;}
 .baro-fab::before,.baro-fab::after{
-  content:""; position:absolute; inset:-6px; border-radius:999px; background:#111; opacity:.35; animation:baro-pulse 2s linear infinite; z-index:-2;
+  content:""; position:absolute; inset:-6px; border-radius:999px; background:#EF6824; opacity:.35; animation:baro-pulse 2s linear infinite; z-index:-2;
 }
 .baro-fab::after{ animation-delay:1s; }
 @keyframes baro-pulse{0%{transform:scale(1);opacity:.55}70%{transform:scale(1.8);opacity:0}100%{opacity:0}}
@@ -16,7 +16,7 @@
 /* Enhanced Header */
 .baro-header{
   padding:12px 14px; 
-  background:#111; 
+  background:#EF6824; 
   color:#fff; 
   display:flex; 
   justify-content:space-between; 
@@ -78,7 +78,7 @@
 .baro-minimize-btn, .baro-clear-btn{
   background:none; 
   border:none; 
-  color:#fff; 
+  color:white; 
   cursor:pointer; 
   padding:4px; 
   border-radius:4px; 
@@ -95,12 +95,12 @@
 .baro-body{padding:12px; overflow:auto; display:flex; flex-direction:column; gap:10px; flex-grow: 1;}
 .baro-input{display:flex; gap:8px; padding:10px; border-top:1px solid #eee}
 .baro-input input{flex:1; padding:10px 12px; border:1px solid #e5e5e5; border-radius:12px; font-size: 15px;}
-.baro-input button{padding:10px 14px; border:none; border-radius:12px; background:#111; color:#fff; cursor:pointer; font-size: 15px;}
+.baro-input button{padding:10px 14px; border:none; border-radius:12px; background:#EF6824; color:#fff; cursor:pointer; font-size: 15px;}
 .baro-send-btn{
   padding:10px 14px; 
   border:none; 
   border-radius:12px; 
-  background:#111; 
+  background:#EF6824; 
   color:#fff; 
   cursor:pointer; 
   display:flex; 
@@ -109,7 +109,7 @@
   transition:background 0.2s;
 }
 .baro-send-btn:hover{
-  background:#333;
+  background:#EF6824;
 }
 .baro-send-btn svg{
   width:16px; 
@@ -147,7 +147,7 @@
   color:#374151;
 }
 .baro-msg.user .baro-avatar-icon{
-  background:#111; 
+  background:#EF6824; 
   color:#fff;
 }
 .baro-avatar-img{
@@ -167,7 +167,7 @@
   word-wrap:break-word;
 }
 .baro-msg.user .baro-bubble{
-  background:#111; 
+  background:#EF6824; 
   color:#fff; 
   border-bottom-right-radius:4px;
 }
@@ -282,7 +282,7 @@
   padding: 10px 14px;
   border: none;
   border-radius: 12px;
-  background: #111;
+  background: #EF6824;
   color: #fff;
   cursor: pointer;
   font-size: 15px;
@@ -321,4 +321,179 @@
 }
 .baro-footer-link:hover {
   color: #666;
+}
+
+/* Popup Notification */
+.baro-popup {
+  position: absolute;
+  bottom: 80px;
+  right: 0;
+  z-index: 10000;
+  animation: baro-popup-slide-in 0.3s ease-out;
+}
+
+.baro-popup.hidden {
+  animation: baro-popup-slide-out 0.3s ease-in forwards;
+}
+
+.baro-popup.fade-in {
+  animation: baro-popup-fade-in 0.5s ease-out;
+}
+
+.baro-popup-content {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 280px;
+  max-width: 350px;
+  position: relative;
+  border: 1px solid #e5e7eb;
+}
+
+.baro-popup-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  color: #6b7280;
+  transition: all 0.2s;
+}
+
+.baro-popup-close:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.baro-popup-logo {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.baro-popup-logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.baro-popup-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.baro-popup-greeting {
+  font-weight: 600;
+  font-size: 14px;
+  color: #EF6824;
+  line-height: 1.4;
+  margin-bottom: 2px;
+}
+
+.baro-popup-message {
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+/* Slide Animation with Vue Transitions */
+.baro-slide-container {
+  min-height: 1.4em;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.baro-slide-text {
+  display: inline-block;
+  width: 100%;
+  line-height: 1.4;
+}
+
+/* Vue Transition Classes */
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.slide-up-enter-from {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(-20px);
+}
+
+.slide-up-enter-to,
+.slide-up-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.baro-popup-arrow {
+  position: absolute;
+  bottom: -8px;
+  right: 20px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid #fff;
+}
+
+
+/* Popup Animations */
+@keyframes baro-popup-slide-in {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes baro-popup-slide-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.9);
+  }
+}
+
+@keyframes baro-popup-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }

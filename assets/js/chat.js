@@ -101,6 +101,33 @@ const baroAiChatApp = {
       </a>
       </div>
     </div>
+    <!-- Popup Notification -->
+    <div class="baro-popup" :class="{ hidden: !showPopup, 'fade-in': showPopup }" v-if="showPopup">
+      <div class="baro-popup-content">
+        <div class="baro-popup-close" @click="hidePopup">×</div>
+        <div class="baro-popup-logo">
+          <img :src="logoUrl" alt="AI Logo" class="baro-popup-logo-img">
+        </div>
+        <div class="baro-popup-text">
+          <div class="baro-popup-greeting">
+            <div class="baro-slide-container">
+              <transition name="slide-up" mode="out-in">
+                <div :key="currentGreeting" class="baro-slide-text">{{ currentGreeting }}</div>
+              </transition>
+            </div>
+          </div>
+          <div class="baro-popup-message">
+            <div class="baro-slide-container">
+              <transition name="slide-up" mode="out-in">
+                <div :key="currentMessage" class="baro-slide-text">{{ currentMessage }}</div>
+              </transition>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="baro-popup-arrow"></div>
+    </div>
+    
     <button class="baro-fab" :title="'Chat với ' + brand" @click="togglePanel">
       <span class="baro-fab-pulse"></span>
       🤖
@@ -121,6 +148,13 @@ const baroAiChatApp = {
       formError: '',
       logoUrl: '',
       primaryLogoUrl: '',
+      showPopup: true,
+      popupGreeting: 'Xin chào anh chị đã quan tâm tới Thế Giới Số!',
+      popupMessage: 'Em có thể giúp gì cho Anh/Chị ạ?',
+      currentGreeting: 'Xin chào anh chị đã quan tâm tới Thế Giới Số!',
+      currentMessage: 'Em có thể giúp gì cho Anh/Chị ạ?',
+      slideInterval: null,
+      popupQuestions: [],
     };
   },
   mounted() {
@@ -133,6 +167,30 @@ const baroAiChatApp = {
     this.logoUrl = this.getLogoUrl();
     this.primaryLogoUrl = this.getPrimaryLogoUrl();
     this.loadChatHistory();
+    
+    // Load popup content from config
+    if (this.apiConfig.popupGreeting) {
+      this.popupGreeting = this.apiConfig.popupGreeting;
+      this.currentGreeting = this.apiConfig.popupGreeting;
+    }
+    if (this.apiConfig.popupMessage) {
+      this.popupMessage = this.apiConfig.popupMessage;
+      this.currentMessage = this.apiConfig.popupMessage;
+    }
+    
+    // Load popup questions from config
+    if (this.apiConfig.popupQuestions) {
+      this.popupQuestions = this.apiConfig.popupQuestions
+        .split('\n')
+        .map(q => q.trim())
+        .filter(q => q.length > 0);
+    }
+    
+    // Start slide animation
+    this.startSlideAnimation();
+  },
+  beforeUnmount() {
+    this.stopSlideAnimation();
   },
   methods: {
     getLogoUrl() {
@@ -147,6 +205,51 @@ const baroAiChatApp = {
     },
     togglePanel() {
       this.panelVisible = !this.panelVisible;
+      // Hide popup when opening chat, show popup when minimizing
+      if (this.panelVisible) {
+        this.hidePopup();
+      } else {
+        // Show popup with fade in effect when minimizing
+        setTimeout(() => {
+          this.showPopupWithFadeIn();
+        }, 300); // Wait for panel close animation
+      }
+    },
+    hidePopup() {
+      this.showPopup = false;
+      this.stopSlideAnimation();
+    },
+    showPopupWithFadeIn() {
+      this.showPopup = true;
+      this.startSlideAnimation();
+    },
+    startSlideAnimation() {
+      // Use questions from admin or fallback to default
+      const questions = this.popupQuestions.length > 0 ? this.popupQuestions : [
+        this.popupGreeting,
+        'Chào mừng bạn đến với Thế Giới Số!',
+        'Xin chào! Tôi có thể hỗ trợ gì cho bạn?',
+        'Chào bạn! Hãy để tôi giúp đỡ nhé!',
+        'Bạn cần tư vấn về dịch vụ nào?',
+        'Tôi sẵn sàng trả lời mọi câu hỏi!',
+        'Hãy cho tôi biết bạn quan tâm gì nhé!'
+      ];
+      
+      let currentIndex = 0;
+      
+      this.slideInterval = setInterval(() => {
+        if (!this.showPopup) return;
+        
+        currentIndex = (currentIndex + 1) % questions.length;
+        this.currentGreeting = questions[currentIndex];
+        this.currentMessage = this.popupMessage; // Keep message static
+      }, 4000); // Change every 4 seconds
+    },
+    stopSlideAnimation() {
+      if (this.slideInterval) {
+        clearInterval(this.slideInterval);
+        this.slideInterval = null;
+      }
     },
     quickSend(message) {
       this.newMessage = message;

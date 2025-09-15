@@ -74,7 +74,10 @@ class Baro_AI_Chatbot_Grounded {
       window.BARO_AI_CFG = {
         restBase: "<?php echo esc_js(esc_url_raw(trailingslashit(get_rest_url(null, 'baro-ai/v1')))); ?>",
         nonce: "<?php echo esc_js($nonce); ?>",
-        pluginUrl: "<?php echo esc_js(plugin_dir_url(__FILE__)); ?>"
+        pluginUrl: "<?php echo esc_js(plugin_dir_url(__FILE__)); ?>",
+        popupGreeting: "<?php echo esc_js($settings['popup_greeting'] ?? 'Xin chào anh chị đã quan tâm tới Thế Giới Số!'); ?>",
+        popupMessage: "<?php echo esc_js($settings['popup_message'] ?? 'Em có thể giúp gì cho Anh/Chị ạ?'); ?>",
+        popupQuestions: "<?php echo esc_js($settings['popup_questions'] ?? ''); ?>"
       };
     </script>
     <?php
@@ -85,8 +88,8 @@ class Baro_AI_Chatbot_Grounded {
     // Register Vue.js from a CDN
     wp_register_script('vue', 'https://unpkg.com/vue@3/dist/vue.global.js', [], '3.4.27', true);
     // Register our chat script with a dependency on Vue
-    wp_register_script('baro-ai-chat', $base . 'assets/js/chat.js', ['vue'], '1.9.0', true);
-    wp_register_style('baro-ai-chat', $base . 'assets/css/chat.css', [], '1.9.0');
+    wp_register_script('baro-ai-chat', $base . 'assets/js/chat.js', ['vue'], '2.5.0', true);
+    wp_register_style('baro-ai-chat', $base . 'assets/css/chat.css', [], '2.5.0');
   }
 
   public function register_routes() {
@@ -368,6 +371,11 @@ class Baro_AI_Chatbot_Grounded {
     add_settings_section('baro_telegram_section', 'Cấu hình Telegram', '__return_false', 'baro-ai-chatbot');
     add_settings_field('telegram_bot_token','Telegram Bot Token', [$this,'field_telegram_bot_token'], 'baro-ai-chatbot','baro_telegram_section');
     add_settings_field('telegram_chat_id','Telegram Chat ID', [$this,'field_telegram_chat_id'], 'baro-ai-chatbot','baro_telegram_section');
+    
+    add_settings_section('baro_popup_section', 'Cấu hình Popup Thông Báo', '__return_false', 'baro-ai-chatbot');
+    add_settings_field('popup_greeting','Lời chào popup', [$this,'field_popup_greeting'], 'baro-ai-chatbot','baro_popup_section');
+    add_settings_field('popup_message','Nội dung popup', [$this,'field_popup_message'], 'baro-ai-chatbot','baro_popup_section');
+    add_settings_field('popup_questions','Danh sách câu hỏi popup', [$this,'field_popup_questions'], 'baro-ai-chatbot','baro_popup_section');
   }
 
   public function field_api_key() {
@@ -409,6 +417,27 @@ class Baro_AI_Chatbot_Grounded {
     echo '<input type="text" name="'.esc_attr(self::OPT_KEY).'[telegram_chat_id]" value="'.esc_attr($chat_id).'" placeholder="-1001234567890" style="width:260px">';
     echo '<p class="description">Chat ID hoặc Channel ID để nhận thông báo (có thể âm).</p>';
   }
+  
+  public function field_popup_greeting() {
+    $v = get_option(self::OPT_KEY, []);
+    $greeting = isset($v['popup_greeting']) ? $v['popup_greeting'] : 'Xin chào anh chị đã quan tâm tới Thế Giới Số!';
+    echo '<input type="text" name="'.esc_attr(self::OPT_KEY).'[popup_greeting]" value="'.esc_attr($greeting).'" style="width:100%;max-width:500px;">';
+    echo '<p class="description">Lời chào hiển thị trong popup thông báo.</p>';
+  }
+  
+  public function field_popup_message() {
+    $v = get_option(self::OPT_KEY, []);
+    $message = isset($v['popup_message']) ? $v['popup_message'] : 'Em có thể giúp gì cho Anh/Chị ạ?';
+    echo '<input type="text" name="'.esc_attr(self::OPT_KEY).'[popup_message]" value="'.esc_attr($message).'" style="width:100%;max-width:500px;">';
+    echo '<p class="description">Nội dung chính hiển thị trong popup thông báo.</p>';
+  }
+  
+  public function field_popup_questions() {
+    $v = get_option(self::OPT_KEY, []);
+    $questions = isset($v['popup_questions']) ? $v['popup_questions'] : "Chào mừng bạn đến với Thế Giới Số!\nXin chào! Tôi có thể hỗ trợ gì cho bạn?\nChào bạn! Hãy để tôi giúp đỡ nhé!\nBạn cần tư vấn về dịch vụ nào?\nTôi sẵn sàng trả lời mọi câu hỏi!\nHãy cho tôi biết bạn quan tâm gì nhé!";
+    echo '<textarea name="'.esc_attr(self::OPT_KEY).'[popup_questions]" rows="8" style="width:100%;max-width:500px;">'.esc_textarea($questions).'</textarea>';
+    echo '<p class="description">Danh sách các câu hỏi/thông điệp hiển thị trong popup (mỗi dòng một câu).</p>';
+  }
 
   public function settings_page() {
     if (isset($_POST[self::OPT_KEY])) {
@@ -420,7 +449,10 @@ class Baro_AI_Chatbot_Grounded {
         'brand' => sanitize_text_field($in['brand'] ?? get_bloginfo('name')), 
         'kb' => wp_kses_post($in['kb'] ?? ''),
         'telegram_bot_token' => !empty($in['telegram_bot_token']) ? sanitize_text_field($in['telegram_bot_token']) : ($saved['telegram_bot_token'] ?? ''),
-        'telegram_chat_id' => sanitize_text_field($in['telegram_chat_id'] ?? '')
+        'telegram_chat_id' => sanitize_text_field($in['telegram_chat_id'] ?? ''),
+        'popup_greeting' => sanitize_text_field($in['popup_greeting'] ?? 'Xin chào anh chị đã quan tâm tới Thế Giới Số!'),
+        'popup_message' => sanitize_text_field($in['popup_message'] ?? 'Em có thể giúp gì cho Anh/Chị ạ?'),
+        'popup_questions' => sanitize_textarea_field($in['popup_questions'] ?? '')
       ];
       update_option(self::OPT_KEY, $new);
     }
