@@ -287,6 +287,12 @@
   cursor: pointer;
   font-size: 15px;
   margin-top: 5px;
+  transition: all 0.3s ease;
+}
+.baro-info-form button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 .baro-info-form .error-msg {
   color: #d93025;

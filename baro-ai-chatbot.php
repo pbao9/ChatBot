@@ -20,6 +20,7 @@ class Baro_AI_Chatbot_Grounded {
     add_action('admin_init', [$this, 'register_settings']);
     add_action('admin_post_baro_ai_save_product', [$this, 'handle_product_form']);
     add_action('admin_init', [$this, 'handle_product_actions']);
+    add_action('wp_ajax_update_receiver_name', [$this, 'ajax_update_receiver_name']);
     register_activation_hook($plugin_file, [$this, 'activate']);
     register_deactivation_hook($plugin_file, [$this, 'deactivate']);
   }
@@ -37,9 +38,41 @@ class Baro_AI_Chatbot_Grounded {
         phone varchar(20) DEFAULT '' NOT NULL,
         email varchar(100) DEFAULT '' NOT NULL,
         message text NOT NULL,
+        status varchar(20) DEFAULT 'chua_lien_he' NOT NULL,
+        receiver_name varchar(100) DEFAULT '' NOT NULL,
+        current_page_url varchar(500) DEFAULT '' NOT NULL,
         PRIMARY KEY  (id)
     ) $charset_collate;";
     dbDelta($sql_leads);
+
+    // Add status and receiver_name columns if they don't exist (for existing installations)
+    $columns = $wpdb->get_col("DESCRIBE $table_name_leads");
+    if (!in_array('status', $columns)) {
+      $wpdb->query("ALTER TABLE $table_name_leads ADD COLUMN status varchar(20) DEFAULT 'chua_lien_he' NOT NULL");
+
+      // Update existing records to have default status
+      $wpdb->query("UPDATE $table_name_leads SET status = 'chua_lien_he' WHERE status IS NULL OR status = ''");
+
+      if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log("BARO AI: Added status column to existing leads table");
+      }
+    }
+
+    if (!in_array('receiver_name', $columns)) {
+      $wpdb->query("ALTER TABLE $table_name_leads ADD COLUMN receiver_name varchar(100) DEFAULT '' NOT NULL");
+
+      if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log("BARO AI: Added receiver_name column to existing leads table");
+      }
+    }
+
+    if (!in_array('current_page_url', $columns)) {
+      $wpdb->query("ALTER TABLE $table_name_leads ADD COLUMN current_page_url varchar(500) DEFAULT '' NOT NULL");
+
+      if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log("BARO AI: Added current_page_url column to existing leads table");
+      }
+    }
 
     $table_name_products = $wpdb->prefix . 'baro_ai_products';
     $sql_products = "CREATE TABLE $table_name_products (
@@ -53,6 +86,9 @@ class Baro_AI_Chatbot_Grounded {
         PRIMARY KEY  (id)
     ) $charset_collate;";
     dbDelta($sql_products);
+
+    // Add sample data for server rental services
+    $this->seed_sample_products();
   }
 
   public function deactivate() {
@@ -77,7 +113,8 @@ class Baro_AI_Chatbot_Grounded {
         pluginUrl: "<?php echo esc_js(plugin_dir_url(__FILE__)); ?>",
         popupGreeting: "<?php echo esc_js($settings['popup_greeting'] ?? 'Xin chào anh chị đã quan tâm tới Thế Giới Số!'); ?>",
         popupMessage: "<?php echo esc_js($settings['popup_message'] ?? 'Em có thể giúp gì cho Anh/Chị ạ?'); ?>",
-        popupQuestions: "<?php echo esc_js($settings['popup_questions'] ?? ''); ?>"
+        popupQuestions: "<?php echo esc_js($settings['popup_questions'] ?? ''); ?>",
+        registrationLink: "<?php echo esc_js($settings['registration_link'] ?? ''); ?>"
       };
     </script>
     <?php
@@ -163,20 +200,23 @@ class Baro_AI_Chatbot_Grounded {
     $body = $req->get_json_params();
     $user_msg = trim(sanitize_text_field($body['message'] ?? ''));
     $is_form_submission = isset($body['is_form_submission']) && $body['is_form_submission'];
+    $current_page_url = isset($body['current_page_url']) ? esc_url_raw($body['current_page_url']) : '';
     
     if ($user_msg === '') {
       return new \WP_REST_Response(['error'=>'Empty message'], 400);
     }
-    
+
     // Handle form submission - save lead and return success without showing message
-    if ($is_form_submission || $this->extract_and_save_lead($user_msg)) {
-        if ($is_form_submission) {
-            // For form submissions, return success without any message
-            return new \WP_REST_Response(['success' => true], 200);
-        } else {
-            // For regular lead extraction, show the thank you message
-            return new \WP_REST_Response(['answer' => 'Cảm ơn bạn đã cung cấp thông tin. Chúng tôi sẽ liên hệ bạn lại trong thời gian sớm nhất!'], 200);
-        }
+    if ($is_form_submission) {
+      // For form submissions, always save the lead and send Telegram notification
+      $this->extract_and_save_lead($user_msg, $current_page_url);
+      return new \WP_REST_Response(['success' => true], 200);
+    }
+
+    // For regular messages, try to extract lead info
+    if ($this->extract_and_save_lead($user_msg)) {
+      // For regular lead extraction, show the thank you message
+      return new \WP_REST_Response(['answer' => 'Cảm ơn bạn đã cung cấp thông tin. Chúng tôi sẽ liên hệ bạn lại trong thời gian sớm nhất!'], 200);
     }
     $settings = get_option(self::OPT_KEY, []);
     $api_key  = $settings['api_key'] ?? '';
@@ -192,7 +232,7 @@ class Baro_AI_Chatbot_Grounded {
     } else {
         $contextText .= "\n" . $this->build_context($kb, [], $brand)[0];
     }
-    $system = "Bạn là một trợ lý AI hữu ích của {$brand}. Vai trò của bạn là hỗ trợ khách hàng một cách thân thiện, chuyên nghiệp bằng tiếng Việt. Cố gắng trả lời tất cả các câu hỏi một cách tốt nhất có thể.\n\nQUY TẮC:\n1. TRẢ LỜI DỰA VÀO CONTEXT: Khi câu hỏi có thể được trả lời bằng CONTEXT, hãy trả lời và trích dẫn nguồn (nếu có). Sau đó, trả về JSON: `{\"grounded\": true, \"answer\": \"...\", \"sources\": []}`.\n2. TRẢ LỜI CÂU HỎI CHUNG: Đối với các câu hỏi chung hoặc câu hỏi không có trong CONTEXT, hãy trả lời một cách hữu ích. Nếu bạn không biết câu trả lời, hãy nói vậy. Sau đó, trả về JSON: `{\"grounded\": false, \"answer\": \"...\"}`.\n3. KHAI THÁC THÔNG TIN: Nếu câu hỏi của người dùng có liên quan đến sản phẩm/dịch vụ nhưng không thể trả lời bằng CONTEXT, hãy yêu cầu họ cung cấp Tên, SĐT và Email để chuyên gia hỗ trợ. Ví dụ: \"Để tư vấn chi tiết hơn, bạn vui lòng cho mình xin Tên, SĐT và Email để chuyên viên của chúng tôi liên hệ nhé.\". Sau đó, trả về JSON: `{\"grounded\": false, \"request_contact\": true, \"answer\": \"...\"}`.\n4. ĐỊNH DẠNG: Luôn sử dụng Markdown để định dạng câu trả lời cho dễ đọc. Dùng **chữ in đậm** để nhấn mạnh các tiêu đề hoặc thông tin quan trọng. Dùng dấu * ở đầu dòng để tạo danh sách.\n\nLUÔN LUÔN trả lời bằng một đối tượng JSON hợp lệ theo các quy tắc trên.\n\nCONTEXT:\n{$contextText}\n\nALLOWED_SOURCES:\n" . implode("\n", $urls);
+    $system = "Trợ lý AI của {$brand}. Chuyên: Cloud, Hosting, VPS, Email Marketing, Web Design, IT Support.\n\nQUY TẮC:\n1. CONTEXT có sẵn → JSON: {\"grounded\": true, \"answer\": \"...\", \"sources\": []}\n2. Câu hỏi chung → JSON: {\"grounded\": false, \"answer\": \"...\"}\n3. Cần tư vấn chi tiết → Yêu cầu Tên, SĐT, Email. JSON: {\"grounded\": false, \"request_contact\": true, \"answer\": \"...\"}\n4. Dùng Markdown, emoji, **in đậm**.\n\nCONTEXT:\n{$contextText}\n\nNGUỒN:\n" . implode("\n", $urls);
     $history  = is_array($body['history'] ?? null) ? $body['history'] : [];
     $contents = [];
     foreach ($history as $turn) {
@@ -234,22 +274,155 @@ class Baro_AI_Chatbot_Grounded {
   }
 
   public function handle_product_actions() {
-    if (!isset($_GET['page']) || $_GET['page'] !== 'baro-ai-products' || !current_user_can('manage_options')) return;
+    if (!isset($_GET['page']) || !current_user_can('manage_options'))
+      return;
     $action = $_GET['action'] ?? '';
-    if ($action === 'delete' && !empty($_GET['id'])) {
+
+    // Handle product actions
+    if ($_GET['page'] === 'baro-ai-products') {
+      if ($action === 'delete' && !empty($_GET['id'])) {
         $product_id = absint($_GET['id']);
         if (check_admin_referer('baro_ai_delete_product_' . $product_id)) {
-            global $wpdb; $wpdb->delete($wpdb->prefix . 'baro_ai_products', ['id' => $product_id], ['%d']);
-            wp_redirect(admin_url('admin.php?page=baro-ai-products&feedback=deleted'));
-            exit;
+          global $wpdb;
+          $wpdb->delete($wpdb->prefix . 'baro_ai_products', ['id' => $product_id], ['%d']);
+          wp_redirect(admin_url('admin.php?page=baro-ai-products&feedback=deleted'));
+          exit;
         }
-    }
-    if ($action === 'seed_definitions') {
+      }
+      if ($action === 'seed_definitions') {
         if (check_admin_referer('baro_ai_seed_definitions_nonce')) {
-            $this->seed_definitions_into_db();
-            wp_redirect(admin_url('admin.php?page=baro-ai-products&feedback=seeded'));
-            exit;
+          $this->seed_definitions_into_db();
+          wp_redirect(admin_url('admin.php?page=baro-ai-products&feedback=seeded'));
+          exit;
         }
+      }
+      if ($action === 'update_database') {
+        if (check_admin_referer('baro_ai_update_database_nonce')) {
+          $this->update_database_schema();
+          wp_redirect(admin_url('admin.php?page=baro-ai-products&feedback=database_updated'));
+          exit;
+        }
+      }
+    }
+
+    // Handle leads actions
+    if ($_GET['page'] === 'baro-ai-leads') {
+      if ($action === 'delete' && !empty($_GET['id'])) {
+        $lead_id = absint($_GET['id']);
+        if (check_admin_referer('baro_ai_delete_lead_' . $lead_id)) {
+          global $wpdb;
+          $wpdb->delete($wpdb->prefix . 'baro_ai_leads', ['id' => $lead_id], ['%d']);
+          wp_redirect(admin_url('admin.php?page=baro-ai-leads&feedback=deleted'));
+          exit;
+        }
+      }
+      if ($action === 'update_status' && !empty($_GET['id']) && !empty($_GET['status'])) {
+        $lead_id = absint($_GET['id']);
+        $status = sanitize_text_field($_GET['status']);
+
+        // Debug logging
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+          error_log("BARO AI: Updating lead status - ID: $lead_id, Status: $status");
+        }
+
+        if (check_admin_referer('baro_ai_update_lead_status_' . $lead_id) && in_array($status, ['chua_lien_he', 'da_lien_he', 'dang_tu_van', 'da_chot_don'])) {
+          global $wpdb;
+          $table_name = $wpdb->prefix . 'baro_ai_leads';
+
+          // Get current lead info for Telegram notification
+          $lead = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_name WHERE id = %d", $lead_id));
+
+          // Check if status column exists, if not add it
+          $columns = $wpdb->get_col("DESCRIBE $table_name");
+          if (!in_array('status', $columns)) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+              error_log("BARO AI: Status column missing, adding it");
+            }
+            $wpdb->query("ALTER TABLE $table_name ADD COLUMN status varchar(20) DEFAULT 'chua_lien_he' NOT NULL");
+          }
+
+          $result = $wpdb->update($table_name, ['status' => $status], ['id' => $lead_id], ['%s'], ['%d']);
+
+          if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("BARO AI: Update result: " . ($result !== false ? $result : 'false'));
+            if ($result === false) {
+              error_log("BARO AI: Database error: " . $wpdb->last_error);
+            }
+          }
+
+          if ($result !== false) {
+            // Send Telegram notification
+            $this->send_admin_action_telegram_notification('status_update', $lead, $status);
+          }
+
+          wp_redirect(admin_url('admin.php?page=baro-ai-leads&feedback=updated'));
+          exit;
+        } else {
+          if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("BARO AI: Nonce verification failed or invalid status");
+          }
+        }
+      }
+    }
+  }
+
+  private function update_database_schema()
+  {
+    global $wpdb;
+    $table_name_leads = $wpdb->prefix . 'baro_ai_leads';
+
+    // Check if status and receiver_name columns exist
+    $columns = $wpdb->get_col("DESCRIBE $table_name_leads");
+    if (!in_array('status', $columns)) {
+      $wpdb->query("ALTER TABLE $table_name_leads ADD COLUMN status varchar(20) DEFAULT 'chua_lien_he' NOT NULL");
+
+      // Update existing records
+      $wpdb->query("UPDATE $table_name_leads SET status = 'chua_lien_he' WHERE status IS NULL OR status = ''");
+
+      if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log("BARO AI: Database schema updated - added status column");
+      }
+    }
+
+    if (!in_array('receiver_name', $columns)) {
+      $wpdb->query("ALTER TABLE $table_name_leads ADD COLUMN receiver_name varchar(100) DEFAULT '' NOT NULL");
+
+      if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log("BARO AI: Database schema updated - added receiver_name column");
+      }
+    }
+  }
+
+  public function ajax_update_receiver_name()
+  {
+    // Check nonce and permissions
+    if (!wp_verify_nonce($_POST['nonce'], 'baro_ai_update_receiver_name') || !current_user_can('manage_options')) {
+      wp_die('Unauthorized');
+    }
+
+    $lead_id = absint($_POST['lead_id']);
+    $receiver_name = sanitize_text_field($_POST['receiver_name']);
+
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'baro_ai_leads';
+
+    // Get current lead info for Telegram notification
+    $lead = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_name WHERE id = %d", $lead_id));
+
+    $result = $wpdb->update(
+      $table_name,
+      ['receiver_name' => $receiver_name],
+      ['id' => $lead_id],
+      ['%s'],
+      ['%d']
+    );
+
+    if ($result !== false) {
+      // Send Telegram notification
+      $this->send_admin_action_telegram_notification('receiver_update', $lead, $receiver_name);
+      wp_send_json_success(['message' => 'Cập nhật thành công']);
+    } else {
+      wp_send_json_error(['message' => 'Cập nhật thất bại: ' . $wpdb->last_error]);
     }
   }
 
@@ -296,13 +469,21 @@ class Baro_AI_Chatbot_Grounded {
     }
     $products = $wpdb->get_results("SELECT * FROM $table_name ORDER BY category, name ASC");
     ?>
-    <div class="wrap"><h1>Dịch vụ & Sản phẩm <a href="?page=baro-ai-products&action=add" class="page-title-action">Thêm mới</a> <a href="<?php echo wp_nonce_url('?page=baro-ai-products&action=seed_definitions', 'baro_ai_seed_definitions_nonce'); ?>" class="page-title-action">Thêm định nghĩa dịch vụ</a></h1>
+                                <div class="wrap">
+                                  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+                                  <h1>Dịch vụ & Sản phẩm <a href="?page=baro-ai-products&action=add" class="page-title-action">Thêm mới</a> <a
+                                      href="<?php echo wp_nonce_url('?page=baro-ai-products&action=seed_definitions', 'baro_ai_seed_definitions_nonce'); ?>"
+                                  class="page-title-action">Thêm định nghĩa dịch vụ</a> <a
+                                  href="<?php echo wp_nonce_url('?page=baro-ai-products&action=update_database', 'baro_ai_update_database_nonce'); ?>"
+                                  class="page-title-action">Cập nhật Database</a></h1>
         <?php 
         if (!empty($_GET['feedback'])) {
             $feedback_msg = '';
             if ($_GET['feedback'] === 'saved') $feedback_msg = 'Đã lưu thành công.';
             if ($_GET['feedback'] === 'seeded') $feedback_msg = 'Đã thêm các định nghĩa dịch vụ mẫu thành công.';
             if ($_GET['feedback'] === 'deleted') $feedback_msg = 'Đã xóa thành công.';
+          if ($_GET['feedback'] === 'database_updated')
+            $feedback_msg = 'Đã cập nhật database thành công.';
             if ($feedback_msg) echo '<div class="notice notice-success is-dismissible"><p>' . $feedback_msg . '</p></div>';
         } 
         ?>
@@ -315,7 +496,9 @@ class Baro_AI_Chatbot_Grounded {
                     <td><strong><?php echo esc_html($p->name); ?></strong></td>
                     <td><?php echo esc_html($p->category); ?></td>
                     <td><?php echo esc_html($p->price); ?></td>
-                    <td><a href="?page=baro-ai-products&action=edit&id=<?php echo $p->id; ?>">Sửa</a> | <a href="<?php echo wp_nonce_url('?page=baro-ai-products&action=delete&id=' . $p->id, 'baro_ai_delete_product_' . $p->id); ?>" onclick="return confirm('Bạn có chắc muốn xóa?')" style="color:red;">Xóa</a></td>
+                    <td><a href="?page=baro-ai-products&action=edit&id=<?php echo $p->id; ?>">Sửa</a> | <a href="#"
+                        onclick="deleteProduct(<?php echo $p->id; ?>, '<?php echo wp_create_nonce('baro_ai_delete_product_' . $p->id); ?>')"
+                        style="color:red;">Xóa</a></td>
                 </tr>
             <?php endforeach; else: ?>
                 <tr><td colspan="4">Chưa có sản phẩm nào.</td></tr>
@@ -323,7 +506,144 @@ class Baro_AI_Chatbot_Grounded {
             </tbody>
         </table>
     </div>
+    
+    <script>
+    function deleteProduct(productId, nonce) {
+        Swal.fire({
+            title: "Xác nhận xóa",
+            text: "Bạn có chắc muốn xóa sản phẩm này? Hành động này không thể hoàn tác!",
+            icon: "warning",
+            showCancelButton: true,
+            confirmButtonColor: "#d33",
+            cancelButtonColor: "#3085d6",
+            confirmButtonText: "Có, xóa!",
+            cancelButtonText: "Hủy"
+        }).then((result) => {
+            if (result.isConfirmed) {
+                // Show loading
+                Swal.fire({
+                    title: "Đang xóa...",
+                    text: "Vui lòng chờ trong giây lát",
+                    icon: "info",
+                    allowOutsideClick: false,
+                    showConfirmButton: false,
+                    willOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+                
+                var url = "?page=baro-ai-products&action=delete&id=" + productId + "&_wpnonce=" + nonce;
+                window.location.href = url;
+            }
+        });
+    }
+    
+    // Show success/error messages from URL parameters
+    document.addEventListener("DOMContentLoaded", function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const feedback = urlParams.get("feedback");
+        
+        if (feedback === "saved") {
+            Swal.fire({
+                title: "Thành công!",
+                text: "Sản phẩm đã được lưu thành công",
+                icon: "success",
+                timer: 3000,
+                showConfirmButton: false
+            });
+        } else if (feedback === "seeded") {
+            Swal.fire({
+                title: "Thành công!",
+                text: "Đã thêm các định nghĩa dịch vụ mẫu thành công",
+                icon: "success",
+                timer: 3000,
+                showConfirmButton: false
+            });
+        } else if (feedback === "deleted") {
+            Swal.fire({
+                title: "Đã xóa!",
+                text: "Sản phẩm đã được xóa thành công",
+                icon: "success",
+                timer: 3000,
+                showConfirmButton: false
+            });
+        } else if (feedback === "database_updated") {
+            Swal.fire({
+                title: "Thành công!",
+                text: "Database đã được cập nhật thành công",
+                icon: "success",
+                timer: 3000,
+                showConfirmButton: false
+            });
+        }
+    });
+    </script>
     <?php
+  }
+
+  private function seed_sample_products()
+  {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'baro_ai_products';
+
+    // Sample server rental products
+    $sample_products = [
+      [
+        'name' => 'Server Dell Xeon Gold 36 Cores',
+        'category' => 'Server Dell',
+        'price' => '3.700.000đ/tháng',
+        'sale_price' => '1.999.000đ/tháng (24 tháng)',
+        'config' => 'CPU: 2 x Intel Xeon Gold/Platinum - 36 Cores | 72 Threads, RAM: 64GB DDR4 ECC, Ổ cứng: 2 x 480GB Enterprise SSD, Băng thông: 100Mbps | Port 10/40Gbps, IP: 01 IPv4',
+        'description' => '🔥 THUÊ SERVER DELL CẤU HÌNH KHỦNG – GIÁ SIÊU RẺ TẠI THẾ GIỚI SỐ. Hiệu năng vượt trội – Hoạt động ổn định – Giá tiết kiệm đến 40%. Data Center: Viettel & VNPT – Uptime 99.99%. Hỗ trợ kỹ thuật 24/7 – Phản hồi chỉ trong 15 phút! Phù hợp cho: Phần mềm ERP/CRM, AI/ML, Big Data, Web traffic cao, Render đồ họa, Tính toán chuyên sâu.'
+      ],
+      [
+        'name' => 'VPS Cloud',
+        'category' => 'VPS',
+        'price' => 'Liên hệ',
+        'sale_price' => '',
+        'config' => 'CPU: 1-8 cores, RAM: 1-32GB, SSD: 20-500GB, Băng thông: 100Mbps-1Gbps',
+        'description' => 'VPS Cloud linh hoạt, hiệu năng cao với khả năng mở rộng tài nguyên theo nhu cầu. Phù hợp cho website, ứng dụng web, phát triển phần mềm.'
+      ],
+      [
+        'name' => 'Cloud Hosting',
+        'category' => 'Hosting',
+        'price' => 'Từ 99.000đ/tháng',
+        'sale_price' => '',
+        'config' => 'SSD: 1-100GB, Băng thông: Không giới hạn, Email: 1-1000 accounts',
+        'description' => 'Cloud Hosting ổn định, tốc độ cao với uptime 99.9%. Phù hợp cho website doanh nghiệp, blog, thương mại điện tử.'
+      ],
+      [
+        'name' => 'Email Marketing',
+        'category' => 'Email Marketing',
+        'price' => 'Từ 500.000đ/tháng',
+        'sale_price' => '',
+        'config' => 'Gửi: 10.000-1.000.000 email/tháng, Template: 100+ mẫu, Analytics: Chi tiết',
+        'description' => 'Dịch vụ Email Marketing chuyên nghiệp với template đẹp, phân tích chi tiết, tỷ lệ gửi thành công cao.'
+      ],
+      [
+        'name' => 'Thiết kế Website',
+        'category' => 'Web Design',
+        'price' => 'Từ 5.000.000đ',
+        'sale_price' => '',
+        'config' => 'Responsive Design, SEO Friendly, CMS, Bảo hành 12 tháng',
+        'description' => 'Thiết kế website chuyên nghiệp, responsive, tối ưu SEO. Bao gồm: Giao diện đẹp, CMS dễ quản lý, bảo hành dài hạn.'
+      ],
+      [
+        'name' => 'IT Support',
+        'category' => 'IT Services',
+        'price' => 'Từ 2.000.000đ/tháng',
+        'sale_price' => '',
+        'config' => 'Hỗ trợ 24/7, Bảo trì hệ thống, Cài đặt phần mềm, Backup dữ liệu',
+        'description' => 'Dịch vụ IT Support chuyên nghiệp với đội ngũ kỹ thuật giàu kinh nghiệm. Hỗ trợ 24/7, bảo trì hệ thống, cài đặt phần mềm.'
+      ]
+    ];
+
+    foreach ($sample_products as $product) {
+      $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM $table_name WHERE name = %s", $product['name']));
+      if (!$exists) {
+        $wpdb->insert($table_name, $product);
+      }
+    }
   }
 
   private function seed_definitions_into_db() {
@@ -348,16 +668,402 @@ class Baro_AI_Chatbot_Grounded {
   public function leads_page() {
     global $wpdb;
     $table_name = $wpdb->prefix . 'baro_ai_leads';
-    $leads = $wpdb->get_results("SELECT * FROM $table_name ORDER BY created_at DESC LIMIT 1000");
-    echo '<div class="wrap"><h1>Khách hàng tiềm năng</h1><p>Danh sách thông tin khách hàng thu thập được từ chatbot.</p><table class="wp-list-table widefat fixed striped"><thead><tr><th style="width:170px;">Thời gian</th><th>Tên</th><th>SĐT</th><th>Email</th><th>Tin nhắn gốc</th></tr></thead><tbody>';
+
+    // Pagination
+    $per_page = 20;
+    $current_page = isset($_GET['paged']) ? max(1, absint($_GET['paged'])) : 1;
+    $offset = ($current_page - 1) * $per_page;
+
+    // Get total count
+    $total_items = $wpdb->get_var("SELECT COUNT(*) FROM $table_name");
+    $total_pages = ceil($total_items / $per_page);
+
+    // Get leads for current page
+    $leads = $wpdb->get_results($wpdb->prepare(
+      "SELECT * FROM $table_name ORDER BY created_at DESC LIMIT %d OFFSET %d",
+      $per_page,
+      $offset
+    ));
+
+    // Status options
+    $status_options = [
+      'chua_lien_he' => 'Chưa liên hệ',
+      'da_lien_he' => 'Đã liên hệ',
+      'dang_tu_van' => 'Đang tư vấn',
+      'da_chot_don' => 'Đã chốt đơn'
+    ];
+
+    // Status colors
+    $status_colors = [
+      'chua_lien_he' => '#dc3545',
+      'da_lien_he' => '#ffc107',
+      'dang_tu_van' => '#17a2b8',
+      'da_chot_don' => '#28a745'
+    ];
+
+    echo '<div class="wrap">';
+    echo '<h1>Khách hàng tiềm năng</h1>';
+    echo '<p>Danh sách thông tin khách hàng thu thập được từ chatbot.</p>';
+
+    // Add SweetAlert2 and ajaxurl
+    echo '<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>';
+    echo '<script>var ajaxurl = "' . admin_url('admin-ajax.php') . '";</script>';
+
+    // Add custom CSS
+    echo '<style>
+    .receiver-name-cell:hover {
+        background-color: #f0f0f0 !important;
+    }
+    .receiver-name-cell.editing {
+        background-color: #fff3cd !important;
+    }
+    .tablenav {
+        margin: 6px 0 4px;
+        padding: 0;
+        font-size: 13px;
+        line-height: 2.15384615;
+        color: #646970;
+    }
+    .tablenav-pages {
+        float: right;
+        margin: 0;
+        text-align: right;
+    }
+    .tablenav-pages .button {
+        margin-left: 2px;
+        padding: 3px 8px;
+        text-decoration: none;
+        border: 1px solid #c3c4c7;
+        background: #f6f7f7;
+        color: #2c3338;
+        border-radius: 2px;
+    }
+    .tablenav-pages .button:hover {
+        background: #f0f0f1;
+        border-color: #8c8f94;
+    }
+    .tablenav-pages .button:focus {
+        box-shadow: 0 0 0 1px #2271b1;
+        outline: 2px solid transparent;
+    }
+    .tablenav-pages .paging-input {
+        margin: 0 6px;
+        font-weight: 400;
+    }
+    .displaying-num {
+        margin-right: 10px;
+        font-style: italic;
+    }
+    </style>';
+
+    // Show feedback messages
+    if (!empty($_GET['feedback'])) {
+      $feedback_msg = '';
+      if ($_GET['feedback'] === 'deleted')
+        $feedback_msg = 'Đã xóa khách hàng thành công.';
+      if ($_GET['feedback'] === 'updated')
+        $feedback_msg = 'Đã cập nhật trạng thái thành công.';
+      if ($feedback_msg)
+        echo '<div class="notice notice-success is-dismissible"><p>' . $feedback_msg . '</p></div>';
+    }
+
+    echo '<table class="wp-list-table widefat fixed striped">';
+    echo '<thead><tr><th style="width:150px;">Thời gian</th><th>Tên</th><th>SĐT</th><th>Email</th><th>Người tiếp nhận</th><th style="width:120px;">Trạng thái</th><th>Trang đang xem</th><th>Tin nhắn gốc</th><th style="width:150px;">Hành động</th></tr></thead>';
+    echo '<tbody>';
+
     if ($leads) {
         foreach ($leads as $lead) {
-            echo '<tr><td>' . esc_html(date('d/m/Y H:i:s', strtotime($lead->created_at))) . '</td><td>' . (isset($lead->name) ? esc_html($lead->name) : '') . '</td><td><strong>' . esc_html($lead->phone) . '</strong></td><td>' . (isset($lead->email) ? esc_html($lead->email) : '') . '</td><td>' . esc_html($lead->message) . '</td></tr>';
+        $status = $lead->status ?? 'chua_lien_he';
+        $status_text = $status_options[$status] ?? 'Chưa liên hệ';
+        $status_color = $status_colors[$status] ?? '#dc3545';
+
+        echo '<tr>';
+        echo '<td>' . esc_html(date('d/m/Y H:i:s', strtotime($lead->created_at))) . '</td>';
+        echo '<td>' . (isset($lead->name) ? esc_html($lead->name) : '') . '</td>';
+        echo '<td><strong>' . esc_html($lead->phone) . '</strong></td>';
+        echo '<td>' . (isset($lead->email) ? esc_html($lead->email) : '') . '</td>';
+        echo '<td class="receiver-name-cell" data-lead-id="' . $lead->id . '" data-receiver-name="' . esc_attr($lead->receiver_name ?? '') . '" style="cursor: pointer; position: relative;">';
+        echo '<span class="receiver-name-display">' . (isset($lead->receiver_name) && !empty($lead->receiver_name) ? esc_html($lead->receiver_name) : '-') . '</span>';
+        echo '<input type="text" class="receiver-name-input" value="' . esc_attr($lead->receiver_name ?? '') . '" style="display: none; width: 100%; padding: 2px 5px; border: 1px solid #0073aa;">';
+        echo '</td>';
+        echo '<td><span style="color: ' . $status_color . '; font-weight: bold;">' . $status_text . '</span></td>';
+        echo '<td>';
+        if (!empty($lead->current_page_url)) {
+          echo '<a href="' . esc_url($lead->current_page_url) . '" target="_blank" style="color: #0073aa; text-decoration: none; font-size: 12px;">' . esc_html($lead->current_page_url) . '</a>';
+        } else {
+          echo '-';
         }
+        echo '</td>';
+        echo '<td>' . esc_html($lead->message) . '</td>';
+        echo '<td>';
+
+        // Status dropdown
+        echo '<select onchange="updateLeadStatus(' . $lead->id . ', this.value, \'' . wp_create_nonce('baro_ai_update_lead_status_' . $lead->id) . '\')" style="margin-bottom: 5px; width: 100%;">';
+        foreach ($status_options as $key => $label) {
+          $selected = ($key === $status) ? 'selected' : '';
+          echo '<option value="' . $key . '" ' . $selected . '>' . $label . '</option>';
+        }
+        echo '</select>';
+
+        // Delete button
+        echo '<a href="#" onclick="deleteLead(' . $lead->id . ', \'' . wp_create_nonce('baro_ai_delete_lead_' . $lead->id) . '\')" style="color: red; text-decoration: none;">🗑️ Xóa</a>';
+
+        echo '</td>';
+        echo '</tr>';
+      }
     } else {
-        echo '<tr><td colspan="5">Chưa có dữ liệu.</td></tr>';
+      echo '<tr><td colspan="8">Chưa có dữ liệu.</td></tr>';
     }
-    echo '</tbody></table></div>';
+
+    echo '</tbody></table>';
+
+    // Pagination
+    if ($total_pages > 1) {
+      echo '<div class="tablenav">';
+      echo '<div class="tablenav-pages">';
+      echo '<span class="displaying-num">' . $total_items . ' mục</span>';
+
+      $base_url = admin_url('admin.php?page=baro-ai-leads');
+
+      // Previous page
+      if ($current_page > 1) {
+        echo '<a class="prev-page button" href="' . $base_url . '&paged=' . ($current_page - 1) . '">‹ Trước</a>';
+      }
+
+      // Page numbers
+      $start_page = max(1, $current_page - 2);
+      $end_page = min($total_pages, $current_page + 2);
+
+      if ($start_page > 1) {
+        echo '<a class="first-page button" href="' . $base_url . '&paged=1">1</a>';
+        if ($start_page > 2) {
+          echo '<span class="paging-input">…</span>';
+        }
+      }
+
+      for ($i = $start_page; $i <= $end_page; $i++) {
+        if ($i == $current_page) {
+          echo '<span class="paging-input"><span class="tablenav-paging-text">' . $i . ' / ' . $total_pages . '</span></span>';
+        } else {
+          echo '<a class="button" href="' . $base_url . '&paged=' . $i . '">' . $i . '</a>';
+        }
+      }
+
+      if ($end_page < $total_pages) {
+        if ($end_page < $total_pages - 1) {
+          echo '<span class="paging-input">…</span>';
+        }
+        echo '<a class="last-page button" href="' . $base_url . '&paged=' . $total_pages . '">' . $total_pages . '</a>';
+      }
+
+      // Next page
+      if ($current_page < $total_pages) {
+        echo '<a class="next-page button" href="' . $base_url . '&paged=' . ($current_page + 1) . '">Tiếp ›</a>';
+      }
+
+      echo '</div>';
+      echo '</div>';
+    }
+
+    echo '</div>';
+
+    // JavaScript for status update, delete, and inline editing
+    echo '<script>
+    // Inline editing for receiver name
+    document.addEventListener("DOMContentLoaded", function() {
+        const receiverCells = document.querySelectorAll(".receiver-name-cell");
+        
+        receiverCells.forEach(cell => {
+            cell.addEventListener("dblclick", function() {
+                const leadId = this.dataset.leadId;
+                const displaySpan = this.querySelector(".receiver-name-display");
+                const inputField = this.querySelector(".receiver-name-input");
+                const originalValue = this.dataset.receiverName;
+                
+                // Hide display, show input
+                displaySpan.style.display = "none";
+                inputField.style.display = "block";
+                this.classList.add("editing");
+                inputField.focus();
+                inputField.select();
+                
+                // Handle save on Enter or blur
+                const saveEdit = () => {
+                    const newValue = inputField.value.trim();
+                    
+                    if (newValue !== originalValue) {
+                        // Show loading
+                        inputField.style.background = "#f0f0f0";
+                        inputField.disabled = true;
+                        
+                        // AJAX update
+                        const formData = new FormData();
+                        formData.append("action", "update_receiver_name");
+                        formData.append("lead_id", leadId);
+                        formData.append("receiver_name", newValue);
+                        formData.append("nonce", "' . wp_create_nonce('baro_ai_update_receiver_name') . '");
+                        
+                        fetch(ajaxurl, {
+                            method: "POST",
+                            body: formData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                // Update display and data attribute
+                                displaySpan.textContent = newValue || "-";
+                                this.dataset.receiverName = newValue;
+                                
+                                // Show success message
+                                Swal.fire({
+                                    title: "Thành công!",
+                                    text: "Đã cập nhật người tiếp nhận",
+                                    icon: "success",
+                                    timer: 2000,
+                                    showConfirmButton: false
+                                });
+                            } else {
+                                // Show error and revert
+                                Swal.fire({
+                                    title: "Lỗi!",
+                                    text: data.data.message || "Có lỗi xảy ra",
+                                    icon: "error"
+                                });
+                                inputField.value = originalValue;
+                            }
+                        })
+                        .catch(error => {
+                            console.error("Error:", error);
+                            Swal.fire({
+                                title: "Lỗi!",
+                                text: "Có lỗi xảy ra khi cập nhật",
+                                icon: "error"
+                            });
+                            inputField.value = originalValue;
+                        })
+                        .finally(() => {
+                            // Reset input field
+                            inputField.style.background = "";
+                            inputField.disabled = false;
+                            inputField.style.display = "none";
+                            displaySpan.style.display = "block";
+                            this.classList.remove("editing");
+                        });
+                    } else {
+                        // No change, just hide input
+                        inputField.style.display = "none";
+                        displaySpan.style.display = "block";
+                        this.classList.remove("editing");
+                    }
+                };
+                
+                // Handle Enter key
+                inputField.addEventListener("keydown", function(e) {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        saveEdit();
+                    } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        inputField.value = originalValue;
+                        inputField.style.display = "none";
+                        displaySpan.style.display = "block";
+                        this.classList.remove("editing");
+                    }
+                });
+                
+                // Handle blur (click outside)
+                inputField.addEventListener("blur", saveEdit);
+            });
+        });
+    });
+    
+    function updateLeadStatus(leadId, newStatus, nonce) {
+        Swal.fire({
+            title: "Xác nhận cập nhật",
+            text: "Bạn có chắc muốn cập nhật trạng thái khách hàng này?",
+            icon: "question",
+            showCancelButton: true,
+            confirmButtonColor: "#3085d6",
+            cancelButtonColor: "#d33",
+            confirmButtonText: "Có, cập nhật!",
+            cancelButtonText: "Hủy"
+        }).then((result) => {
+            if (result.isConfirmed) {
+                // Show loading
+                Swal.fire({
+                    title: "Đang cập nhật...",
+                    text: "Vui lòng chờ trong giây lát",
+                    icon: "info",
+                    allowOutsideClick: false,
+                    showConfirmButton: false,
+                    willOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+                
+                var url = "' . admin_url('admin.php') . '?page=baro-ai-leads&action=update_status&id=" + leadId + "&status=" + newStatus + "&_wpnonce=" + nonce;
+                window.location.href = url;
+            } else {
+                // Reset dropdown to original value
+                event.target.value = event.target.dataset.originalValue || "' . $status . '";
+            }
+        });
+    }
+    
+    function deleteLead(leadId, nonce) {
+        Swal.fire({
+            title: "Xác nhận xóa",
+            text: "Bạn có chắc muốn xóa khách hàng này? Hành động này không thể hoàn tác!",
+            icon: "warning",
+            showCancelButton: true,
+            confirmButtonColor: "#d33",
+            cancelButtonColor: "#3085d6",
+            confirmButtonText: "Có, xóa!",
+            cancelButtonText: "Hủy"
+        }).then((result) => {
+            if (result.isConfirmed) {
+                // Show loading
+                Swal.fire({
+                    title: "Đang xóa...",
+                    text: "Vui lòng chờ trong giây lát",
+                    icon: "info",
+                    allowOutsideClick: false,
+                    showConfirmButton: false,
+                    willOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+                
+                var url = "' . admin_url('admin.php') . '?page=baro-ai-leads&action=delete&id=" + leadId + "&_wpnonce=" + nonce;
+                window.location.href = url;
+            }
+        });
+    }
+    
+    // Show success/error messages from URL parameters
+    document.addEventListener("DOMContentLoaded", function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const feedback = urlParams.get("feedback");
+        
+        if (feedback === "updated") {
+            Swal.fire({
+                title: "Thành công!",
+                text: "Trạng thái khách hàng đã được cập nhật",
+                icon: "success",
+                timer: 3000,
+                showConfirmButton: false
+            });
+        } else if (feedback === "deleted") {
+            Swal.fire({
+                title: "Đã xóa!",
+                text: "Khách hàng đã được xóa thành công",
+                icon: "success",
+                timer: 3000,
+                showConfirmButton: false
+            });
+        }
+    });
+    </script>';
   }
 
   public function register_settings() {
@@ -371,6 +1077,7 @@ class Baro_AI_Chatbot_Grounded {
     add_settings_section('baro_telegram_section', 'Cấu hình Telegram', '__return_false', 'baro-ai-chatbot');
     add_settings_field('telegram_bot_token','Telegram Bot Token', [$this,'field_telegram_bot_token'], 'baro-ai-chatbot','baro_telegram_section');
     add_settings_field('telegram_chat_id','Telegram Chat ID', [$this,'field_telegram_chat_id'], 'baro-ai-chatbot','baro_telegram_section');
+    add_settings_field('registration_link', 'Link đăng ứng', [$this, 'field_registration_link'], 'baro-ai-chatbot', 'baro_telegram_section');
     
     add_settings_section('baro_popup_section', 'Cấu hình Popup Thông Báo', '__return_false', 'baro-ai-chatbot');
     add_settings_field('popup_greeting','Lời chào popup', [$this,'field_popup_greeting'], 'baro-ai-chatbot','baro_popup_section');
@@ -417,7 +1124,15 @@ class Baro_AI_Chatbot_Grounded {
     echo '<input type="text" name="'.esc_attr(self::OPT_KEY).'[telegram_chat_id]" value="'.esc_attr($chat_id).'" placeholder="-1001234567890" style="width:260px">';
     echo '<p class="description">Chat ID hoặc Channel ID để nhận thông báo (có thể âm).</p>';
   }
-  
+
+  public function field_registration_link()
+  {
+    $v = get_option(self::OPT_KEY, []);
+    $registration_link = isset($v['registration_link']) ? $v['registration_link'] : '';
+    echo '<input type="url" name="' . esc_attr(self::OPT_KEY) . '[registration_link]" value="' . esc_attr($registration_link) . '" placeholder="https://example.com/dang-ky" style="width:100%;max-width:500px;">';
+    echo '<p class="description">Link đăng ứng sẽ được gửi cho khách hàng sau khi họ nhập form thành công.</p>';
+  }
+
   public function field_popup_greeting() {
     $v = get_option(self::OPT_KEY, []);
     $greeting = isset($v['popup_greeting']) ? $v['popup_greeting'] : 'Xin chào anh chị đã quan tâm tới Thế Giới Số!';
@@ -521,12 +1236,17 @@ class Baro_AI_Chatbot_Grounded {
 1. Tên khách hàng (nếu có)
 2. Số điện thoại (nếu có) 
 3. Email (nếu có)
+4. Người tiếp nhận (nếu có - chỉ khi được đề cập rõ ràng trong tin nhắn)
+
+Tin nhắn thường có format như: \"Tên: Nguyễn Văn A, SĐT: 0123456789, Email: test@example.com\"
+Hoặc có thể có thêm: \"Người tiếp nhận: Anh B\" nếu được đề cập.
 
 Trả về kết quả dưới dạng JSON với format:
 {
   \"name\": \"Tên khách hàng hoặc null\",
   \"phone\": \"Số điện thoại hoặc null\", 
-  \"email\": \"Email hoặc null\"
+  \"email\": \"Email hoặc null\",
+  \"receiver_name\": \"Tên người tiếp nhận hoặc null\"
 }
 
 Chỉ trả về JSON, không giải thích thêm.";
@@ -571,88 +1291,273 @@ Chỉ trả về JSON, không giải thích thêm.";
     return [
       'name' => !empty($ai_result['name']) ? trim($ai_result['name']) : '',
       'phone' => !empty($ai_result['phone']) ? trim($ai_result['phone']) : '',
-      'email' => !empty($ai_result['email']) ? trim($ai_result['email']) : ''
+      'email' => !empty($ai_result['email']) ? trim($ai_result['email']) : '',
+      'receiver_name' => !empty($ai_result['receiver_name']) ? trim($ai_result['receiver_name']) : ''
     ];
   }
 
   private function extract_customer_info_fallback($message) {
     // Fallback to regex-based extraction
-    preg_match('/(0[3|5|7|8|9])([0-9]{8})/', $message, $phone_matches);
-    $phone = !empty($phone_matches[0]) ? $phone_matches[0] : '';
-
-    preg_match('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i', $message, $email_matches);
-    $email = !empty($email_matches[0]) ? $email_matches[0] : '';
-
+    $phone = '';
+    $email = '';
     $name = '';
+    $receiver_name = '';
+
+    // Extract phone number - improved pattern
+    if (preg_match('/SĐT:\s*([0-9\s\-+]+)/ui', $message, $phone_matches)) {
+      $phone = preg_replace('/[^0-9]/', '', $phone_matches[1]);
+    } elseif (preg_match('/(0[3|5|7|8|9])([0-9]{8})/', $message, $phone_matches)) {
+      $phone = $phone_matches[0];
+    }
+
+    // Extract email - improved pattern
+    if (preg_match('/Email:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/ui', $message, $email_matches)) {
+      $email = $email_matches[1];
+    } elseif (preg_match('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i', $message, $email_matches)) {
+      $email = $email_matches[0];
+    }
+
+    // Extract name - improved pattern
     if (preg_match('/Tên:\s*([^,]+)/ui', $message, $name_matches)) {
         $name = trim($name_matches[1]);
     } elseif (preg_match('/(tên tôi là|tên của tôi là|tên mình là|mình tên là)\s*([^\d\n,]+)/ui', $message, $name_matches)) {
         $name = trim($name_matches[2]);
     }
-    
+
+    // Extract receiver name
+    if (preg_match('/Người tiếp nhận:\s*([^,]+)/ui', $message, $receiver_matches)) {
+      $receiver_name = trim($receiver_matches[1]);
+    }
+
     return [
       'name' => $name,
       'phone' => $phone,
-      'email' => $email
+      'email' => $email,
+      'receiver_name' => $receiver_name
     ];
   }
 
-  private function send_telegram_notification($name, $phone, $email, $message) {
+  private function send_telegram_notification($name, $phone, $email, $message, $receiver_name = '', $current_page_url = '')
+  {
     $settings = get_option(self::OPT_KEY, []);
     $bot_token = $settings['telegram_bot_token'] ?? '';
     $chat_id = $settings['telegram_chat_id'] ?? '';
-    
+
+    // Log for debugging
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+      error_log("BARO AI: Attempting to send Telegram notification");
+      error_log("BARO AI: Bot token exists: " . (!empty($bot_token) ? 'Yes' : 'No'));
+      error_log("BARO AI: Chat ID exists: " . (!empty($chat_id) ? 'Yes' : 'No'));
+    }
+
     if (empty($bot_token) || empty($chat_id)) {
+      if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log("BARO AI: Telegram not configured - Bot token or Chat ID missing");
+      }
       return false;
     }
-    
-    $text = "🆕 *KHÁCH HÀNG TIỀM NĂNG MỚI*\n\n";
-    $text .= "👤 *Tên:* " . ($name ?: 'Chưa cung cấp') . "\n";
-    $text .= "📞 *SĐT:* " . ($phone ?: 'Chưa cung cấp') . "\n";
-    $text .= "📧 *Email:* " . ($email ?: 'Chưa cung cấp') . "\n";
+
+    $text = "🆕 *KHÁCH HÀNG TIỀM NĂNG MỚI* 🎉\n\n";
+    $text .= "👤 *Tên:* " . ($name ?: '❌ Chưa cung cấp') . "\n";
+    $text .= "📞 *SĐT:* " . ($phone ?: '❌ Chưa cung cấp') . "\n";
+    $text .= "📧 *Email:* " . ($email ?: '❌ Chưa cung cấp') . "\n";
+    if ($receiver_name) {
+      $text .= "🎯 *Người tiếp nhận:* 👨‍💼 " . $receiver_name . "\n";
+    }
     $text .= "💬 *Tin nhắn:* " . $message . "\n";
     $text .= "⏰ *Thời gian:* " . current_time('d/m/Y H:i:s') . "\n";
-    $text .= "🌐 *Website:* " . get_bloginfo('name');
-    
+    $text .= "📊 *Trạng thái:* 🔴 Chưa liên hệ\n";
+    $text .= "🌐 *Website:* " . get_bloginfo('name') . "\n";
+
+    // Thêm URL trang hiện tại nếu có
+    if (!empty($current_page_url)) {
+      $text .= "🔗 *Trang đang xem:* " . $current_page_url . "\n";
+    }
+
+    // Thêm link đăng ứng nếu có cấu hình
+    $registration_link = $settings['registration_link'] ?? '';
+    if (!empty($registration_link)) {
+      $text .= "🔗 *Link đăng ứng:* " . $registration_link . "\n";
+    }
+
+    $text .= "\n💡 *Hành động:* Vui lòng liên hệ khách hàng sớm nhất!";
+
     $url = "https://api.telegram.org/bot{$bot_token}/sendMessage";
     $data = [
       'chat_id' => $chat_id,
       'text' => $text,
       'parse_mode' => 'Markdown'
     ];
-    
+
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+      error_log("BARO AI: Sending to Telegram URL: " . $url);
+      error_log("BARO AI: Message: " . $text);
+    }
+
     $response = wp_remote_post($url, [
       'headers' => ['Content-Type' => 'application/json'],
       'body' => wp_json_encode($data),
       'timeout' => 10
     ]);
-    
-    return !is_wp_error($response);
+
+    if (is_wp_error($response)) {
+      if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log("BARO AI: Telegram API error: " . $response->get_error_message());
+      }
+      return false;
+    }
+
+    $response_code = wp_remote_retrieve_response_code($response);
+    $response_body = wp_remote_retrieve_body($response);
+
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+      error_log("BARO AI: Telegram response code: " . $response_code);
+      error_log("BARO AI: Telegram response body: " . $response_body);
+    }
+
+    return $response_code === 200;
   }
 
-  private function extract_and_save_lead($message) {
+  private function send_admin_action_telegram_notification($action_type, $lead, $new_value = '')
+  {
+    $settings = get_option(self::OPT_KEY, []);
+    $bot_token = $settings['telegram_bot_token'] ?? '';
+    $chat_id = $settings['telegram_chat_id'] ?? '';
+
+    if (empty($bot_token) || empty($chat_id)) {
+      if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log("BARO AI: Telegram not configured for admin notifications");
+      }
+      return false;
+    }
+
+    // Status mapping with colors and emojis
+    $status_options = [
+      'chua_lien_he' => '🔴 Chưa liên hệ',
+      'da_lien_he' => '🟡 Đã liên hệ',
+      'dang_tu_van' => '🔵 Đang tư vấn',
+      'da_chot_don' => '🟢 Đã chốt đơn'
+    ];
+
+    $text = "🔄 *CẬP NHẬT THÔNG TIN KHÁCH HÀNG*\n\n";
+    $text .= "👤 *Tên:* " . ($lead->name ?: 'Chưa cung cấp') . "\n";
+    $text .= "📞 *SĐT:* " . ($lead->phone ?: 'Chưa cung cấp') . "\n";
+    $text .= "📧 *Email:* " . ($lead->email ?: 'Chưa cung cấp') . "\n";
+
+    if ($action_type === 'status_update') {
+      $status_display = $status_options[$new_value] ?? $new_value;
+      $text .= "📊 *Trạng thái mới:* " . $status_display . "\n";
+      $text .= "⏰ *Cập nhật lúc:* " . current_time('d/m/Y H:i:s') . "\n";
+
+      // Add status-specific message
+      switch ($new_value) {
+        case 'chua_lien_he':
+          $text .= "💡 *Ghi chú:* Khách hàng chưa được liên hệ\n";
+          break;
+        case 'da_lien_he':
+          $text .= "✅ *Ghi chú:* Đã liên hệ thành công\n";
+          break;
+        case 'dang_tu_van':
+          $text .= "🔄 *Ghi chú:* Đang trong quá trình tư vấn\n";
+          break;
+        case 'da_chot_don':
+          $text .= "🎉 *Ghi chú:* Chúc mừng! Đã chốt đơn thành công\n";
+          break;
+      }
+    } elseif ($action_type === 'receiver_update') {
+      $receiver_display = $new_value ? "👨‍💼 " . $new_value : "❌ Chưa phân công";
+      $text .= "🎯 *Người tiếp nhận:* " . $receiver_display . "\n";
+      $text .= "⏰ *Cập nhật lúc:* " . current_time('d/m/Y H:i:s') . "\n";
+
+      if ($new_value) {
+        $text .= "✅ *Ghi chú:* Đã phân công người phụ trách\n";
+      } else {
+        $text .= "⚠️ *Ghi chú:* Chưa có người phụ trách\n";
+      }
+    }
+
+    $text .= "🌐 *Website:* " . get_bloginfo('name');
+
+    $url = "https://api.telegram.org/bot{$bot_token}/sendMessage";
+    $data = [
+      'chat_id' => $chat_id,
+      'text' => $text,
+      'parse_mode' => 'Markdown'
+    ];
+
+    $response = wp_remote_post($url, [
+      'body' => $data,
+      'timeout' => 10
+    ]);
+
+    if (is_wp_error($response)) {
+      if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log("BARO AI: Telegram admin notification error: " . $response->get_error_message());
+      }
+      return false;
+    }
+
+    $response_code = wp_remote_retrieve_response_code($response);
+    $response_body = wp_remote_retrieve_body($response);
+
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+      error_log("BARO AI: Telegram admin notification response code: " . $response_code);
+      error_log("BARO AI: Telegram admin notification response body: " . $response_body);
+    }
+
+    return $response_code === 200;
+  }
+
+
+
+  private function extract_and_save_lead($message, $current_page_url = '')
+  {
     // Use AI extraction for better accuracy
     $customer_info = $this->extract_customer_info_with_ai($message);
     
     $name = $customer_info['name'];
     $phone = $customer_info['phone'];
     $email = $customer_info['email'];
+    $receiver_name = $customer_info['receiver_name'];
+
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+      error_log("BARO AI: Extracted customer info - Name: '$name', Phone: '$phone', Email: '$email', Receiver: '$receiver_name'");
+    }
 
     // If no phone or email is found, it's not a lead.
-    if (empty($phone) && empty($email)) return false;
+    if (empty($phone) && empty($email)) {
+      if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log("BARO AI: No phone or email found, not saving as lead");
+      }
+      return false;
+    }
 
     global $wpdb;
     $table_name = $wpdb->prefix . 'baro_ai_leads';
-    $wpdb->insert($table_name, [
+    $result = $wpdb->insert($table_name, [
         'created_at' => current_time('mysql'),
         'name'       => sanitize_text_field($name),
         'phone'      => sanitize_text_field($phone),
         'email'      => sanitize_email($email),
-        'message'    => sanitize_textarea_field($message)
+      'receiver_name' => sanitize_text_field($receiver_name),
+      'message' => sanitize_textarea_field($message),
+      'current_page_url' => sanitize_url($current_page_url)
     ]);
 
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+      if ($result === false) {
+        error_log("BARO AI: Failed to insert lead into database: " . $wpdb->last_error);
+      } else {
+        error_log("BARO AI: Successfully inserted lead with ID: " . $wpdb->insert_id);
+      }
+    }
+
     // Send Telegram notification
-    $this->send_telegram_notification($name, $phone, $email, $message);
+    $telegram_sent = $this->send_telegram_notification($name, $phone, $email, $message, $receiver_name, $current_page_url);
+
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+      error_log("BARO AI: Telegram notification sent: " . ($telegram_sent ? 'Yes' : 'No'));
+    }
 
     return true;
   }
