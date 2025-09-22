@@ -1,16 +1,41 @@
 <?php
 /**
  * Plugin Name: BARO AI Chatbot (Grounded)
- * Description: Chatbot AI tư vấn dựa trên Knowledge Base & nội dung nội bộ. Tự động thêm vào footer.
- * Version: 1.7.0
+ * Description: Chatbot AI tư vấn dựa trên Knowledge Base & nội dung nội bộ. Tự động thêm vào footer. Production-ready với error handling và security improvements.
+ * Version: 1.8.0
  * Author: TGS Developers
  * Author URI: https://tgs.com.vn
+ * Requires at least: 5.0
+ * Tested up to: 6.4
+ * Requires PHP: 7.4
+ * License: GPL v2 or later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  */
 
 if (!defined('ABSPATH')) exit;
 
 class Baro_AI_Chatbot_Grounded {
   const OPT_KEY = 'baro_ai_settings';
+
+  /**
+   * Check if debug logging is enabled
+   */
+  private function is_debug_enabled()
+  {
+    $node_env = getenv('NODE_ENV');
+    return defined('WP_DEBUG') && WP_DEBUG &&
+      ($node_env === 'development');
+  }
+
+  /**
+   * Log debug message if debug is enabled
+   */
+  private function debug_log($message)
+  {
+    if ($this->is_debug_enabled()) {
+      error_log("BARO AI: " . $message);
+    }
+  }
 
   public function __construct($plugin_file) {
     add_action('wp_footer', [$this, 'render_chat_widget']);
@@ -23,6 +48,45 @@ class Baro_AI_Chatbot_Grounded {
     add_action('wp_ajax_update_receiver_name', [$this, 'ajax_update_receiver_name']);
     register_activation_hook($plugin_file, [$this, 'activate']);
     register_deactivation_hook($plugin_file, [$this, 'deactivate']);
+
+    // Add global error handlers for production
+    $this->add_global_error_handlers();
+  }
+
+  /**
+   * Add global error handlers for production stability
+   */
+  private function add_global_error_handlers()
+  {
+    // Only add in production to prevent crashes
+    if (!$this->is_debug_enabled()) {
+      set_error_handler([$this, 'handle_php_errors']);
+      register_shutdown_function([$this, 'handle_fatal_errors']);
+    }
+  }
+
+  /**
+   * Handle PHP errors gracefully
+   */
+  public function handle_php_errors($severity, $message, $file, $line)
+  {
+    if (!(error_reporting() & $severity)) {
+      return false;
+    }
+
+    $this->debug_log("PHP Error: $message in $file on line $line");
+    return true;
+  }
+
+  /**
+   * Handle fatal errors
+   */
+  public function handle_fatal_errors()
+  {
+    $error = error_get_last();
+    if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+      $this->debug_log("Fatal Error: {$error['message']} in {$error['file']} on line {$error['line']}");
+    }
   }
 
   public function activate() {
@@ -53,25 +117,19 @@ class Baro_AI_Chatbot_Grounded {
       // Update existing records to have default status
       $wpdb->query("UPDATE $table_name_leads SET status = 'chua_lien_he' WHERE status IS NULL OR status = ''");
 
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log("BARO AI: Added status column to existing leads table");
-      }
+      $this->debug_log("Added status column to existing leads table");
     }
 
     if (!in_array('receiver_name', $columns)) {
       $wpdb->query("ALTER TABLE $table_name_leads ADD COLUMN receiver_name varchar(100) DEFAULT '' NOT NULL");
 
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log("BARO AI: Added receiver_name column to existing leads table");
-      }
+      $this->debug_log("Added receiver_name column to existing leads table");
     }
 
     if (!in_array('current_page_url', $columns)) {
       $wpdb->query("ALTER TABLE $table_name_leads ADD COLUMN current_page_url varchar(500) DEFAULT '' NOT NULL");
 
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log("BARO AI: Added current_page_url column to existing leads table");
-      }
+      $this->debug_log("Added current_page_url column to existing leads table");
     }
 
     $table_name_products = $wpdb->prefix . 'baro_ai_products';
@@ -101,11 +159,17 @@ class Baro_AI_Chatbot_Grounded {
     $nonce = wp_create_nonce('wp_rest');
     $settings = get_option(self::OPT_KEY, []);
     $brand = isset($settings['brand']) ? esc_html($settings['brand']) : get_bloginfo('name');
-    $title = 'Hỗ trợ AI '.$brand. ' 🤖';
+
+    // Use custom title from settings or default
+    if (!empty($settings['chatbot_title'])) {
+      $title = $settings['chatbot_title'];
+    } else {
+      $title = 'Tư vấn ' . $brand . ' 💬';
+    }
     $placeholder = 'Nhập câu hỏi về dịch vụ/sản phẩm...';
     ?>
     <div id="baro-ai-root" class="baro-ai-root" data-title="<?php echo esc_attr($title); ?>"
-         data-placeholder="<?php echo esc_attr($placeholder); ?>" data-brand="<?php echo $brand; ?>" v-cloak></div>
+         data-placeholder="<?php echo esc_attr($placeholder); ?>" data-brand="<?php echo esc_attr($brand); ?>" v-cloak></div>
     <script>
       window.BARO_AI_CFG = {
         restBase: "<?php echo esc_js(esc_url_raw(trailingslashit(get_rest_url(null, 'baro-ai/v1')))); ?>",
@@ -125,8 +189,8 @@ class Baro_AI_Chatbot_Grounded {
     // Register Vue.js from a CDN
     wp_register_script('vue', 'https://unpkg.com/vue@3/dist/vue.global.js', [], '3.4.27', true);
     // Register our chat script with a dependency on Vue
-    wp_register_script('baro-ai-chat', $base . 'assets/js/chat.js', ['vue'], '2.5.0', true);
-    wp_register_style('baro-ai-chat', $base . 'assets/css/chat.css', [], '2.5.0');
+    wp_register_script('baro-ai-chat', $base . 'assets/js/chat.js', ['vue'], '1.8.0', true);
+    wp_register_style('baro-ai-chat', $base . 'assets/css/chat.css', [], '1.8.0');
   }
 
   public function register_routes() {
@@ -134,9 +198,32 @@ class Baro_AI_Chatbot_Grounded {
       'methods'  => 'POST',
       'callback' => [$this, 'handle_chat'],
       'permission_callback' => function() {
+        // Enhanced security checks
         $nonce = isset($_SERVER['HTTP_X_WP_NONCE']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_X_WP_NONCE'])) : '';
-        return wp_verify_nonce($nonce, 'wp_rest');
-      }
+        $referer = isset($_SERVER['HTTP_REFERER']) ? esc_url_raw($_SERVER['HTTP_REFERER']) : '';
+
+        // Check nonce
+        if (!wp_verify_nonce($nonce, 'wp_rest')) {
+          return false;
+        }
+
+        // Check referer (optional but recommended)
+        if (!empty($referer) && !wp_http_validate_url($referer)) {
+          return false;
+        }
+
+        return true;
+      },
+      'args' => [
+        'message' => [
+          'required' => true,
+          'type' => 'string',
+          'sanitize_callback' => 'sanitize_text_field',
+          'validate_callback' => function ($param, $request, $key) {
+            return !empty(trim($param)) && strlen($param) <= 2000;
+          }
+        ]
+      ]
     ]);
   }
 
@@ -194,10 +281,16 @@ class Baro_AI_Chatbot_Grounded {
   }
 
   public function handle_chat(\WP_REST_Request $req) {
+    // Rate limiting
     if (!$this->check_rate_limit()) {
       return new \WP_REST_Response(['error'=>'Too many requests'], 429);
     }
+
+    // Input validation
     $body = $req->get_json_params();
+    if (!is_array($body)) {
+      return new \WP_REST_Response(['error' => 'Invalid request format'], 400);
+    }
     $user_msg = trim(sanitize_text_field($body['message'] ?? ''));
     $is_form_submission = isset($body['is_form_submission']) && $body['is_form_submission'];
     $current_page_url = isset($body['current_page_url']) ? esc_url_raw($body['current_page_url']) : '';
@@ -242,13 +335,32 @@ class Baro_AI_Chatbot_Grounded {
     $contents[] = ['role' => 'user', 'parts' => [['text' => $user_msg]]];
     $api_url = "https://generativelanguage.googleapis.com/v1beta/models/{$settings['model']}:generateContent?key={$api_key}";
     $payload = ['contents' => $contents, 'system_instruction' => ['parts' => [['text' => $system]]], 'generationConfig' => ['temperature' => 0.2, 'response_mime_type' => 'application/json']];
-    $resp = wp_remote_post($api_url, ['headers' => ['Content-Type'  => 'application/json'], 'timeout' => 40, 'body' => wp_json_encode($payload)]);
-    if (is_wp_error($resp)) return new \WP_REST_Response(['error'=>$resp->get_error_message()], 500);
+    $resp = wp_remote_post($api_url, [
+      'headers' => ['Content-Type' => 'application/json'],
+      'timeout' => 30,
+      'body' => wp_json_encode($payload),
+      'blocking' => true
+    ]);
+
+    if (is_wp_error($resp)) {
+      $this->debug_log("API request failed: " . $resp->get_error_message());
+      return new \WP_REST_Response(['error' => 'Service temporarily unavailable'], 503);
+    }
     $code = wp_remote_retrieve_response_code($resp);
     $data = json_decode(wp_remote_retrieve_body($resp), true);
+    
     if ($code >= 400 || !is_array($data)) {
-      $msg = is_array($data) && isset($data['error']['message']) ? $data['error']['message'] : 'Gemini API error';
-      return new \WP_REST_Response(['error'=> $msg], 500);
+      $this->debug_log("API response error - Code: $code, Data: " . wp_json_encode($data));
+
+      // User-friendly error messages
+      if ($code === 429) {
+        return new \WP_REST_Response(['error' => 'Hệ thống đang quá tải, vui lòng thử lại sau'], 429);
+      } elseif ($code === 401 || $code === 403) {
+        return new \WP_REST_Response(['error' => 'Lỗi cấu hình API, vui lòng liên hệ quản trị viên'], 500);
+      } else {
+        $msg = is_array($data) && isset($data['error']['message']) ? $data['error']['message'] : 'Dịch vụ tạm thời không khả dụng';
+        return new \WP_REST_Response(['error' => $msg], 503);
+      }
     }
     $content = $data['candidates'][0]['content']['parts'][0]['text'] ?? '{}';
     $json = json_decode($content, true);
@@ -321,9 +433,7 @@ class Baro_AI_Chatbot_Grounded {
         $status = sanitize_text_field($_GET['status']);
 
         // Debug logging
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-          error_log("BARO AI: Updating lead status - ID: $lead_id, Status: $status");
-        }
+        $this->debug_log("Updating lead status - ID: $lead_id, Status: $status");
 
         if (check_admin_referer('baro_ai_update_lead_status_' . $lead_id) && in_array($status, ['chua_lien_he', 'da_lien_he', 'dang_tu_van', 'da_chot_don'])) {
           global $wpdb;
@@ -335,19 +445,15 @@ class Baro_AI_Chatbot_Grounded {
           // Check if status column exists, if not add it
           $columns = $wpdb->get_col("DESCRIBE $table_name");
           if (!in_array('status', $columns)) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-              error_log("BARO AI: Status column missing, adding it");
-            }
+            $this->debug_log("Status column missing, adding it");
             $wpdb->query("ALTER TABLE $table_name ADD COLUMN status varchar(20) DEFAULT 'chua_lien_he' NOT NULL");
           }
 
           $result = $wpdb->update($table_name, ['status' => $status], ['id' => $lead_id], ['%s'], ['%d']);
 
-          if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log("BARO AI: Update result: " . ($result !== false ? $result : 'false'));
-            if ($result === false) {
-              error_log("BARO AI: Database error: " . $wpdb->last_error);
-            }
+          $this->debug_log("Update result: " . ($result !== false ? $result : 'false'));
+          if ($result === false) {
+            $this->debug_log("Database error: " . $wpdb->last_error);
           }
 
           if ($result !== false) {
@@ -358,9 +464,7 @@ class Baro_AI_Chatbot_Grounded {
           wp_redirect(admin_url('admin.php?page=baro-ai-leads&feedback=updated'));
           exit;
         } else {
-          if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log("BARO AI: Nonce verification failed or invalid status");
-          }
+          $this->debug_log("Nonce verification failed or invalid status");
         }
       }
     }
@@ -379,17 +483,13 @@ class Baro_AI_Chatbot_Grounded {
       // Update existing records
       $wpdb->query("UPDATE $table_name_leads SET status = 'chua_lien_he' WHERE status IS NULL OR status = ''");
 
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log("BARO AI: Database schema updated - added status column");
-      }
+      $this->debug_log("Database schema updated - added status column");
     }
 
     if (!in_array('receiver_name', $columns)) {
       $wpdb->query("ALTER TABLE $table_name_leads ADD COLUMN receiver_name varchar(100) DEFAULT '' NOT NULL");
 
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log("BARO AI: Database schema updated - added receiver_name column");
-      }
+      $this->debug_log("Database schema updated - added receiver_name column");
     }
   }
 
@@ -1095,6 +1195,7 @@ class Baro_AI_Chatbot_Grounded {
     add_settings_field('api_key','Gemini API Key', [$this,'field_api_key'], 'baro-ai-chatbot','baro_ai_section');
     add_settings_field('model','Model',           [$this,'field_model'],  'baro-ai-chatbot','baro_ai_section');
     add_settings_field('brand','Tên thương hiệu', [$this,'field_brand'],  'baro-ai-chatbot','baro_ai_section');
+    add_settings_field('chatbot_title', 'Tiêu đề Chatbot', [$this, 'field_chatbot_title'], 'baro-ai-chatbot', 'baro_ai_section');
     add_settings_field('kb','Knowledge Base tĩnh',[$this,'field_kb'],     'baro-ai-chatbot','baro_ai_section');
     
     add_settings_section('baro_telegram_section', 'Cấu hình Telegram', '__return_false', 'baro-ai-chatbot');
@@ -1125,6 +1226,15 @@ class Baro_AI_Chatbot_Grounded {
     $v = get_option(self::OPT_KEY, []);
     $brand = isset($v['brand']) ? $v['brand'] : get_bloginfo('name');
     echo '<input type="text" name="'.esc_attr(self::OPT_KEY).'[brand]" value="'.esc_attr($brand).'" style="width:260px">';
+  }
+  public function field_chatbot_title()
+  {
+    $v = get_option(self::OPT_KEY, []);
+    $brand = isset($v['brand']) ? $v['brand'] : get_bloginfo('name');
+    $default_title = 'Tư vấn ' . $brand . ' 💬';
+    $title = isset($v['chatbot_title']) ? $v['chatbot_title'] : $default_title;
+    echo '<input type="text" name="' . esc_attr(self::OPT_KEY) . '[chatbot_title]" value="' . esc_attr($title) . '" style="width:400px">';
+    echo '<p class="description">Tiêu đề hiển thị trên chatbot. Để trống sẽ dùng mặc định: "Tư vấn [Tên thương hiệu] 💬"</p>';
   }
   public function field_kb() {
     $v = get_option(self::OPT_KEY, []);
@@ -1184,7 +1294,8 @@ class Baro_AI_Chatbot_Grounded {
       $new = [
         'api_key' => !empty($in['api_key']) ? sanitize_text_field($in['api_key']) : ($saved['api_key'] ?? ''), 
         'model' => sanitize_text_field($in['model'] ?? 'gemini-1.5-flash-latest'), 
-        'brand' => sanitize_text_field($in['brand'] ?? get_bloginfo('name')), 
+        'brand' => sanitize_text_field($in['brand'] ?? get_bloginfo('name')),
+        'chatbot_title' => sanitize_text_field($in['chatbot_title'] ?? ''),
         'kb' => wp_kses_post($in['kb'] ?? ''),
         'telegram_bot_token' => !empty($in['telegram_bot_token']) ? sanitize_text_field($in['telegram_bot_token']) : ($saved['telegram_bot_token'] ?? ''),
         'telegram_chat_id' => sanitize_text_field($in['telegram_chat_id'] ?? ''),
@@ -1367,16 +1478,12 @@ Chỉ trả về JSON, không giải thích thêm.";
     $chat_id = $settings['telegram_chat_id'] ?? '';
 
     // Log for debugging
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-      error_log("BARO AI: Attempting to send Telegram notification");
-      error_log("BARO AI: Bot token exists: " . (!empty($bot_token) ? 'Yes' : 'No'));
-      error_log("BARO AI: Chat ID exists: " . (!empty($chat_id) ? 'Yes' : 'No'));
-    }
+    $this->debug_log("Attempting to send Telegram notification");
+    $this->debug_log("Bot token exists: " . (!empty($bot_token) ? 'Yes' : 'No'));
+    $this->debug_log("Chat ID exists: " . (!empty($chat_id) ? 'Yes' : 'No'));
 
     if (empty($bot_token) || empty($chat_id)) {
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log("BARO AI: Telegram not configured - Bot token or Chat ID missing");
-      }
+      $this->debug_log("Telegram not configured - Bot token or Chat ID missing");
       return false;
     }
 
@@ -1412,10 +1519,8 @@ Chỉ trả về JSON, không giải thích thêm.";
       'parse_mode' => 'Markdown'
     ];
 
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-      error_log("BARO AI: Sending to Telegram URL: " . $url);
-      error_log("BARO AI: Message: " . $text);
-    }
+    $this->debug_log("Sending to Telegram URL: " . $url);
+    $this->debug_log("Message: " . $text);
 
     $response = wp_remote_post($url, [
       'headers' => ['Content-Type' => 'application/json'],
@@ -1424,19 +1529,15 @@ Chỉ trả về JSON, không giải thích thêm.";
     ]);
 
     if (is_wp_error($response)) {
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log("BARO AI: Telegram API error: " . $response->get_error_message());
-      }
+      $this->debug_log("Telegram API error: " . $response->get_error_message());
       return false;
     }
 
     $response_code = wp_remote_retrieve_response_code($response);
     $response_body = wp_remote_retrieve_body($response);
 
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-      error_log("BARO AI: Telegram response code: " . $response_code);
-      error_log("BARO AI: Telegram response body: " . $response_body);
-    }
+    $this->debug_log("Telegram response code: " . $response_code);
+    $this->debug_log("Telegram response body: " . $response_body);
 
     return $response_code === 200;
   }
@@ -1448,9 +1549,7 @@ Chỉ trả về JSON, không giải thích thêm.";
     $chat_id = $settings['telegram_chat_id'] ?? '';
 
     if (empty($bot_token) || empty($chat_id)) {
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log("BARO AI: Telegram not configured for admin notifications");
-      }
+      $this->debug_log("Telegram not configured for admin notifications");
       return false;
     }
 
@@ -1514,19 +1613,15 @@ Chỉ trả về JSON, không giải thích thêm.";
     ]);
 
     if (is_wp_error($response)) {
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log("BARO AI: Telegram admin notification error: " . $response->get_error_message());
-      }
+      $this->debug_log("Telegram admin notification error: " . $response->get_error_message());
       return false;
     }
 
     $response_code = wp_remote_retrieve_response_code($response);
     $response_body = wp_remote_retrieve_body($response);
 
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-      error_log("BARO AI: Telegram admin notification response code: " . $response_code);
-      error_log("BARO AI: Telegram admin notification response body: " . $response_body);
-    }
+    $this->debug_log("Telegram admin notification response code: " . $response_code);
+    $this->debug_log("Telegram admin notification response body: " . $response_body);
 
     return $response_code === 200;
   }
@@ -1543,15 +1638,11 @@ Chỉ trả về JSON, không giải thích thêm.";
     $email = $customer_info['email'];
     $receiver_name = $customer_info['receiver_name'];
 
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-      error_log("BARO AI: Extracted customer info - Name: '$name', Phone: '$phone', Email: '$email', Receiver: '$receiver_name'");
-    }
+    $this->debug_log("Extracted customer info - Name: '$name', Phone: '$phone', Email: '$email', Receiver: '$receiver_name'");
 
     // If no phone or email is found, it's not a lead.
     if (empty($phone) && empty($email)) {
-      if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log("BARO AI: No phone or email found, not saving as lead");
-      }
+      $this->debug_log("No phone or email found, not saving as lead");
       return false;
     }
 
@@ -1567,20 +1658,16 @@ Chỉ trả về JSON, không giải thích thêm.";
       'current_page_url' => sanitize_url($current_page_url)
     ]);
 
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-      if ($result === false) {
-        error_log("BARO AI: Failed to insert lead into database: " . $wpdb->last_error);
-      } else {
-        error_log("BARO AI: Successfully inserted lead with ID: " . $wpdb->insert_id);
-      }
+    if ($result === false) {
+      $this->debug_log("Failed to insert lead into database: " . $wpdb->last_error);
+    } else {
+      $this->debug_log("Successfully inserted lead with ID: " . $wpdb->insert_id);
     }
 
     // Send Telegram notification
     $telegram_sent = $this->send_telegram_notification($name, $phone, $email, $message, $receiver_name, $current_page_url);
 
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-      error_log("BARO AI: Telegram notification sent: " . ($telegram_sent ? 'Yes' : 'No'));
-    }
+    $this->debug_log("Telegram notification sent: " . ($telegram_sent ? 'Yes' : 'No'));
 
     return true;
   }

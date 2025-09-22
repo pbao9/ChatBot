@@ -143,7 +143,7 @@ const baroAiChatApp = {
     data() {
         return {
             panelVisible: false,
-            title: 'Tư vấn nhanh',
+            title: 'Hỗ trợ AI',
             placeholder: 'Nhập câu hỏi...',
             brand: 'Brand',
             history: [], // { role: 'user' | 'assistant', html: '...', typing: bool, timestamp: number }
@@ -431,7 +431,13 @@ const baroAiChatApp = {
                 }
                 localStorage.setItem('baro_ai_chat_history', JSON.stringify(chatData))
             } catch (e) {
-                console.warn('Could not save chat history to localStorage:', e)
+                // Silent fail in production
+                if (
+                    window.location.hostname === 'localhost' ||
+                    window.location.hostname.includes('dev')
+                ) {
+                    console.warn('Could not save chat history to localStorage:', e)
+                }
             }
         },
         loadChatHistory() {
@@ -452,7 +458,13 @@ const baroAiChatApp = {
                     }
                 }
             } catch (e) {
-                console.warn('Could not load chat history from localStorage:', e)
+                // Silent fail in production
+                if (
+                    window.location.hostname === 'localhost' ||
+                    window.location.hostname.includes('dev')
+                ) {
+                    console.warn('Could not load chat history from localStorage:', e)
+                }
             }
         },
         clearChatHistory() {
@@ -465,7 +477,13 @@ const baroAiChatApp = {
                 this.userEmail = ''
                 this.isSubmitting = false
             } catch (e) {
-                console.warn('Could not clear chat history from localStorage:', e)
+                // Silent fail in production
+                if (
+                    window.location.hostname === 'localhost' ||
+                    window.location.hostname.includes('dev')
+                ) {
+                    console.warn('Could not clear chat history from localStorage:', e)
+                }
             }
         },
         // Time formatting
