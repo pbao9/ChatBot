@@ -693,6 +693,9 @@ class Baro_AI_Chatbot_Grounded {
       'da_chot_don' => 'Đã chốt đơn'
     ];
 
+    // Initialize default status for JavaScript
+    $default_status = 'chua_lien_he';
+
     // Status colors
     $status_colors = [
       'chua_lien_he' => '#dc3545',
@@ -875,6 +878,11 @@ class Baro_AI_Chatbot_Grounded {
         
         receiverCells.forEach(cell => {
             cell.addEventListener("dblclick", function() {
+                // Prevent multiple editing sessions
+                if (this.classList.contains("editing")) {
+                    return;
+                }
+                
                 const leadId = this.dataset.leadId;
                 const displaySpan = this.querySelector(".receiver-name-display");
                 const inputField = this.querySelector(".receiver-name-input");
@@ -887,14 +895,28 @@ class Baro_AI_Chatbot_Grounded {
                 inputField.focus();
                 inputField.select();
                 
+                // Remove any existing event listeners to prevent duplicates
+                const newInputField = inputField.cloneNode(true);
+                inputField.parentNode.replaceChild(newInputField, inputField);
+                
+                // Flag to prevent duplicate requests
+                let isUpdating = false;
+                
                 // Handle save on Enter or blur
                 const saveEdit = () => {
-                    const newValue = inputField.value.trim();
+                    // Prevent duplicate requests
+                    if (isUpdating) {
+                        return;
+                    }
+                    
+                    const newValue = newInputField.value.trim();
                     
                     if (newValue !== originalValue) {
+                        isUpdating = true;
+                        
                         // Show loading
-                        inputField.style.background = "#f0f0f0";
-                        inputField.disabled = true;
+                        newInputField.style.background = "#f0f0f0";
+                        newInputField.disabled = true;
                         
                         // AJAX update
                         const formData = new FormData();
@@ -929,7 +951,7 @@ class Baro_AI_Chatbot_Grounded {
                                     text: data.data.message || "Có lỗi xảy ra",
                                     icon: "error"
                                 });
-                                inputField.value = originalValue;
+                                newInputField.value = originalValue;
                             }
                         })
                         .catch(error => {
@@ -939,40 +961,41 @@ class Baro_AI_Chatbot_Grounded {
                                 text: "Có lỗi xảy ra khi cập nhật",
                                 icon: "error"
                             });
-                            inputField.value = originalValue;
+                            newInputField.value = originalValue;
                         })
                         .finally(() => {
                             // Reset input field
-                            inputField.style.background = "";
-                            inputField.disabled = false;
-                            inputField.style.display = "none";
+                            newInputField.style.background = "";
+                            newInputField.disabled = false;
+                            newInputField.style.display = "none";
                             displaySpan.style.display = "block";
                             this.classList.remove("editing");
+                            isUpdating = false;
                         });
                     } else {
                         // No change, just hide input
-                        inputField.style.display = "none";
+                        newInputField.style.display = "none";
                         displaySpan.style.display = "block";
                         this.classList.remove("editing");
                     }
                 };
                 
                 // Handle Enter key
-                inputField.addEventListener("keydown", function(e) {
+                newInputField.addEventListener("keydown", function(e) {
                     if (e.key === "Enter") {
                         e.preventDefault();
                         saveEdit();
                     } else if (e.key === "Escape") {
                         e.preventDefault();
-                        inputField.value = originalValue;
-                        inputField.style.display = "none";
+                        newInputField.value = originalValue;
+                        newInputField.style.display = "none";
                         displaySpan.style.display = "block";
                         this.classList.remove("editing");
                     }
                 });
                 
                 // Handle blur (click outside)
-                inputField.addEventListener("blur", saveEdit);
+                newInputField.addEventListener("blur", saveEdit);
             });
         });
     });
@@ -1005,7 +1028,7 @@ class Baro_AI_Chatbot_Grounded {
                 window.location.href = url;
             } else {
                 // Reset dropdown to original value
-                event.target.value = event.target.dataset.originalValue || "' . $status . '";
+                event.target.value = event.target.dataset.originalValue || "' . $default_status . '";
             }
         });
     }
